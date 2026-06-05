@@ -1,0 +1,20 @@
+[Unit]
+Description=PLC HVAC Commissioning UI
+After=network.target plc-engine.service
+Requires=plc-engine.service
+PartOf=plc-app.target
+
+[Service]
+Type=simple
+User=maxia
+WorkingDirectory=/home/maxia/plc_app/commissioning_ui
+EnvironmentFile=-/home/maxia/plc_app/deployment/systemd/plc-ui.env
+ExecStart=/bin/bash -lc '/usr/bin/npm run serve'
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+[Unit]
+Description=PLC HVAC Engine
+After=network.target
+PartOf=plc-app.target
+
+[Service]
+Type=simple
+User=maxia
+WorkingDirectory=/home/maxia/plc_app
+EnvironmentFile=-/home/maxia/plc_app/deployment/systemd/plc-engine.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/maxia/plc_app
+Environment=PLC_CONFIG_PATH=/home/maxia/plc_app/configs/production.json
+ExecStart=/home/maxia/plc_app/.venv/bin/python3.10 -m plc_hvac.app.main
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
