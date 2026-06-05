@@ -50,6 +50,8 @@ WRITE_ENABLED = getattr(const, "enable_modbus_write", False)
 AO_FULL_SCALE_MV = getattr(const, "analog_output_full_scale_mv", 10000.0)
 SOLENOID_LEAD_SECONDS = getattr(const, "solenoid_lead_seconds", 5.0)
 SOLENOID_OFF_DELAY_SECONDS = getattr(const, "solenoid_off_delay_seconds", 5.0)
+MODBUS_PORT_RECOVERY_FAILS = int(getattr(const, "modbus_port_recovery_fails", 3))
+MODBUS_PORT_RECOVERY_DELAY = float(getattr(const, "modbus_port_recovery_delay_seconds", 1.0))
 
 # Logger simple para procesos hijos (solo stdout)
 def _log(msg: str) -> None:
@@ -133,6 +135,8 @@ def _compute_block(items: List[Dict[str, Any]], one_based: bool) -> Tuple[int, i
 _serial = None
 _READ_SKIP_UNTIL: Dict[int, float] = {}
 _READ_FAILS: Dict[int, int] = {}
+_PORT_CONSECUTIVE_ERRORS = 0
+_READ_VALID = False
 FORCED_INPUTS: Dict[str, Any] = {
     "temperatura_suministro": 12.0,
     "temperatura_retorno": 28.0,
@@ -148,34 +152,94 @@ FORCED_INPUTS: Dict[str, Any] = {
     "estatus_luz_ultravioleta": 1,
     "estatus_calentador": 1,
 }
-_READ_FAILS: Dict[int, int] = {}
-_READ_SKIP_UNTIL: Dict[int, float] = {}
 _serial_lock = threading.Lock()
 _CURRENT_TIPICO = getattr(tipicos, "DEFAULT_TIPICO", 1) if tipicos else 1
+
+
+def _open_serial_port() -> bool:
+    global _serial
+    if not (serial and rtu):
+        return False
+    try:
+        port = serial.Serial(
+            port=MODBUS_PORT,
+            baudrate=MODBUS_BAUD,
+            timeout=MODBUS_TIMEOUT,
+            parity=MODBUS_PARITY,
+            stopbits=MODBUS_STOPBITS,
+            bytesize=MODBUS_BYTESIZE,
+        )
+        if not port.is_open:
+            port.open()
+        _serial = port
+        _log(f"[modbus] Puerto {MODBUS_PORT} abierto")
+        return True
+    except SerialException as exc:
+        _serial = None
+        _log(f"[modbus] Error abriendo puerto {MODBUS_PORT}: {exc}")
+    except Exception as exc:
+        _serial = None
+        _log(f"[modbus] Error inicializando puerto Modbus: {exc}")
+    return False
+
+
+def _close_serial_port() -> None:
+    global _serial
+    port = _serial
+    _serial = None
+    if not port:
+        return
+    try:
+        if getattr(port, "is_open", False):
+            port.close()
+    except Exception as exc:
+        _log(f"[modbus] Error cerrando puerto {MODBUS_PORT}: {exc}")
+
+
+def _recover_serial_port(reason: str) -> bool:
+    global _PORT_CONSECUTIVE_ERRORS, _READ_VALID
+    _READ_VALID = False
+    _log(f"[modbus] Recuperando puerto {MODBUS_PORT}: {reason}")
+    with _serial_lock:
+        _close_serial_port()
+        time.sleep(max(0.0, MODBUS_PORT_RECOVERY_DELAY))
+        recovered = _open_serial_port()
+    _PORT_CONSECUTIVE_ERRORS = 0 if recovered else MODBUS_PORT_RECOVERY_FAILS
+    if recovered:
+        _READ_SKIP_UNTIL.clear()
+        _READ_FAILS.clear()
+        _last_coils.clear()
+        _log(f"[modbus] Puerto {MODBUS_PORT} recuperado; esperando lectura válida antes de escribir")
+    return recovered
+
+
+def _handle_read_error(slave_id: int, typ: str, exc: Exception) -> None:
+    global _PORT_CONSECUTIVE_ERRORS, _READ_VALID
+    _READ_VALID = False
+    _PORT_CONSECUTIVE_ERRORS += 1
+    _log(f"[modbus] Error leyendo slave {slave_id} tipo {typ}: {exc}")
+    _READ_FAILS[slave_id] = _READ_FAILS.get(slave_id, 0) + 1
+    if _READ_FAILS[slave_id] >= 3:
+        _READ_SKIP_UNTIL[slave_id] = time.time() + 10.0
+        _READ_FAILS[slave_id] = 0
+    if "not an allowable address" in str(exc).lower():
+        _READ_SKIP_UNTIL[slave_id] = time.time() + 10.0
+    if _PORT_CONSECUTIVE_ERRORS >= MODBUS_PORT_RECOVERY_FAILS:
+        _recover_serial_port(f"{_PORT_CONSECUTIVE_ERRORS} errores consecutivos")
+
+
+def _mark_read_success() -> None:
+    global _PORT_CONSECUTIVE_ERRORS, _READ_VALID
+    _PORT_CONSECUTIVE_ERRORS = 0
+    _READ_VALID = True
+
 
 if USE_HW:
     if not (serial and rtu):
         _log("[modbus] umodbus o pyserial no disponibles, deshabilitando Modbus HW")
         USE_HW = False
     else:
-        try:
-            _serial = serial.Serial(
-                port=MODBUS_PORT,
-                baudrate=MODBUS_BAUD,
-                timeout=MODBUS_TIMEOUT,
-                parity=MODBUS_PARITY,
-                stopbits=MODBUS_STOPBITS,
-                bytesize=MODBUS_BYTESIZE,
-            )
-            if not _serial.is_open:
-                _serial.open()
-            _log(f"[modbus] Puerto {MODBUS_PORT} abierto para lectura")
-        except SerialException as exc:
-            _log(f"[modbus] Error abriendo puerto {MODBUS_PORT}: {exc}")
-            USE_HW = False
-        except Exception as exc:
-            _log(f"[modbus] Error inicializando Modbus: {exc}")
-            USE_HW = False
+        _open_serial_port()
 
 _last_heater_raw = None
 _last_coils: Dict[str, bool] = {}
@@ -261,7 +325,7 @@ def _refresh_runtime_modbus_settings(shared_state) -> None:
 
 def read_registers_snapshot() -> Dict[str, Any]:
     """Lectura de snapshot, usando HW si está disponible."""
-    if USE_HW and _serial and regist and rtu:
+    if USE_HW and regist and rtu:
         return _read_modbus_inputs()
     _log("[modbus] Snapshot no disponible: HW deshabilitado")
     return {}
@@ -320,7 +384,7 @@ def _allowed_reg_names_for_tipico(tipico_id: int) -> set:
 
 def _read_modbus_inputs(stop_event=None, shared_state=None) -> Dict[str, Any]:
     snapshot: Dict[str, Any] = {}
-    if not (USE_HW and _serial and regist and rtu):
+    if not USE_HW:
         # Simulación: devolver FORCED_INPUTS (mezclado con overrides) y reflejarlo en registros para el monitor.
         forced = dict(FORCED_INPUTS)
         if shared_state:
@@ -333,6 +397,11 @@ def _read_modbus_inputs(stop_event=None, shared_state=None) -> Dict[str, Any]:
                 except Exception:
                     pass
         return forced
+
+    if not (_serial and regist and rtu):
+        _recover_serial_port("puerto no disponible antes de lectura")
+        if not (_serial and regist and rtu):
+            return {}
 
     tipico_id = int(shared_state.get("tipico", getattr(tipicos, "DEFAULT_TIPICO", 1))) if shared_state else getattr(tipicos, "DEFAULT_TIPICO", 1)
     regs_filtered = regist.get_registers_for_tipico(tipico_id) if regist else []
@@ -433,13 +502,7 @@ def _read_modbus_inputs(stop_event=None, shared_state=None) -> Dict[str, Any]:
             else:
                 continue
         except Exception as exc:  # pragma: no cover - runtime
-            _log(f"[modbus] Error leyendo slave {slave_id} tipo {typ}: {exc}")
-            _READ_FAILS[slave_id] = _READ_FAILS.get(slave_id, 0) + 1
-            if _READ_FAILS[slave_id] >= 3:
-                _READ_SKIP_UNTIL[slave_id] = time.time() + 10.0
-                _READ_FAILS[slave_id] = 0
-            if "not an allowable address" in str(exc).lower():
-                _READ_SKIP_UNTIL[slave_id] = time.time() + 10.0
+            _handle_read_error(slave_id, typ, exc)
             continue
 
         for it in items:
@@ -454,6 +517,9 @@ def _read_modbus_inputs(stop_event=None, shared_state=None) -> Dict[str, Any]:
                 pass
 
             _READ_FAILS[slave_id] = 0  # éxito: reset contador
+
+    if snapshot:
+        _mark_read_success()
 
     return snapshot
 
@@ -470,7 +536,7 @@ def _publish_registers_to_shared(shared_state, tipico_id: int) -> None:
 
 
 def read_inputs(stop_event=None, shared_state=None) -> Dict[str, Any]:
-    if USE_HW and _serial and regist and rtu:
+    if USE_HW and regist and rtu:
         return _read_modbus_inputs(stop_event, shared_state)
     _log("[modbus] Lectura ignorada: HW deshabilitado")
     return {}
@@ -478,12 +544,10 @@ def read_inputs(stop_event=None, shared_state=None) -> Dict[str, Any]:
 
 def write_outputs(outputs: Dict[str, Any]) -> None:
     if USE_HW and WRITE_ENABLED and _serial and regist and rtu:
-        # usa tipico actual si shared_state global existe
-        try:
-            from var import tipicos as _t
-            tid = _CURRENT_TIPICO
-        except Exception:
-            tid = 1
+        if not _READ_VALID:
+            _log("[modbus] Escritura bloqueada: lectura válida pendiente tras recuperación")
+            return
+        tid = _CURRENT_TIPICO
         _write_coils_hw(outputs, tid)
         _write_tipico_aos_hw(outputs, tid)
         _write_heater_hw(outputs, tid)
@@ -775,7 +839,7 @@ def modbus_loop(shared_state, stop_event, poll_seconds: float = 3.0) -> None:
     _seq_lead_ts.update({"comp1": None, "comp2": None})
     _seq_off_ts.update({"comp1": None, "comp2": None})
 
-    hw_ready_init = USE_HW and _serial and regist and rtu
+    hw_ready_init = USE_HW and _serial and regist and rtu and _READ_VALID
     if hw_ready_init and actuators_first is not None:
         off_outputs = aplicar_secuencias(dict(desired_off), time.time())
         write_outputs(off_outputs)
@@ -791,7 +855,7 @@ def modbus_loop(shared_state, stop_event, poll_seconds: float = 3.0) -> None:
                 _CURRENT_TIPICO = int(shared_state.get("tipico", getattr(tipicos, "DEFAULT_TIPICO", 1)))
             except Exception:
                 _CURRENT_TIPICO = getattr(tipicos, "DEFAULT_TIPICO", 1)
-            hw_ready = USE_HW and _serial and regist and rtu
+            hw_ready = USE_HW and regist and rtu
             if not hw_ready:
                 if not warned_no_hw:
                     _log("[modbus] HW deshabilitado; no se leerán/escribirán registros")
@@ -799,20 +863,20 @@ def modbus_loop(shared_state, stop_event, poll_seconds: float = 3.0) -> None:
                 time.sleep(poll_seconds)
                 continue
 
+            try:
+                snapshot = read_inputs(stop_event, shared_state)
+            except Exception as exc:
+                snapshot = {}
+                _handle_read_error(0, "loop", exc)
+
             actuators = shared_state.get("actuators")
-            if actuators is not None:
-                # Aplica la secuencia por compresor (ON/OFF) antes de escribir a campo.
+            if snapshot and actuators is not None:
+                # Aplica secuencia antes de escribir a campo.
                 raw_outputs = dict(actuators)
                 current_outputs = aplicar_secuencias(raw_outputs, time.time())
                 write_outputs(current_outputs)
                 for k, v in current_outputs.items():
                     actuators[k] = v
-
-            try:
-                snapshot = read_inputs(stop_event, shared_state)
-            except Exception as exc:
-                snapshot = {}
-                _log(f"[modbus] Error en read_inputs: {exc}")
 
             try:
                 shared_state["last_modbus_ok"] = bool(snapshot)
