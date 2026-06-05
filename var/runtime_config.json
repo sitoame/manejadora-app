@@ -1,0 +1,51 @@
+{
+  "tipico": 2,
+  "on_off_global": false,
+  "mode": "AUTO",
+  "setpoints": {
+    "temperature": 20.0
+  },
+  "settings": {
+    "fan_feedback_timeout_seconds": 45.0,
+    "feedback_tolerance_volts": 1.0,
+    "valve_tracking_timeout_seconds": 60.0,
+    "vfd_tracking_timeout_seconds": 60.0,
+    "vfd_speed_command_pct": 100.0,
+    "mqtt_enabled": false,
+    "ingest_enabled": true,
+    "ingest_interval_seconds": 4.0,
+    "mqtt_status_interval_seconds": 5.0,
+    "valve_pid_kp": 1.2,
+    "valve_pid_ki": 0.0,
+    "valve_pid_kd": 0.0,
+    "valve_deadband_c": 0.2,
+    "valve_min_output_hold_time_seconds": 30.0,
+    "control_mode": "0.0",
+    "temp_supply_offset": 0.0,
+    "temp_return_offset": 0.0,
+    "raw_ai_microamps": true,
+    "pid_temp_kp": 1.0,
+    "pid_temp_ki": 0.05,
+    "pid_temp_kd": 0.0,
+    "startup_delay_seconds": 30.0,
+    "stage2_min_delay_seconds": 60.0,
+    "status_timeout_seconds": 300.0,
+    "valve_vfd_track_tol": 0.8,
+    "valve_vfd_track_timeout_seconds": 20.0,
+    "temperature_setpoint_default": 20.0,
+    "monitor_enabled": true
+  },
+  "manual_overrides": {
+    "comando_vfd": false,
+    "comando_vfd_forced": false,
+    "fan": false,
+    "fan_forced": false,
+    "heater": 0.0,
+    "heater_forced": false,
+    "control_valvula": 0.0,
+    "control_valvula_forced": false,
+    "control_frec_vfd": 0.0,
+    "control_frec_vfd_forced": false
+  },
+  "ts": 1780443897.134295
+}
