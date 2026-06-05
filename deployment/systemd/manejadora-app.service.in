@@ -1,0 +1,28 @@
+[Unit]
+Description=Manejadora App HVAC runtime
+Documentation=file:__APP_ROOT__/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+Group=__SERVICE_GROUP__
+WorkingDirectory=__APP_ROOT__
+EnvironmentFile=-/etc/manejadora-app/manejadora-app.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=__APP_ROOT__
+ExecStart=__PYTHON_BIN__ -u __APP_ROOT__/main.py
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+KillSignal=SIGTERM
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=__APP_ROOT__/logs __APP_ROOT__/var
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

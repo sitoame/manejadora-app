@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_BASE="${API_BASE:-http://192.168.1.121:8090}"
-TARGET="${1:-ahu_supply_fan_cmd}"
-SOURCE="${SOURCE:-COMMISSIONING}"
-TS="$(date -u +%s)"
+API_BASE="${API_BASE:-http://127.0.0.1:8088}"
+TARGET="${1:-fan}"
+MODE="${MODE:-MANUAL}"
+MONITOR_AUTH_USER="${MONITOR_AUTH_USER:-dynatek}"
+MONITOR_AUTH_PASSWORD="${MONITOR_AUTH_PASSWORD:-dynatek}"
 
-curl -fsS -X POST "${API_BASE}/api/v1/outputs/${TARGET}/force" \
+payload="$({ python3 - "$TARGET" "$MODE" <<'PY'
+import json
+import sys
+
+target, mode = sys.argv[1:3]
+print(json.dumps({"mode": mode, "manual_overrides": {target: False, f"{target}_forced": True}}))
+PY
+})"
+
+curl -fsS -u "${MONITOR_AUTH_USER}:${MONITOR_AUTH_PASSWORD}" \
+  -X POST "${API_BASE}/api/runtime" \
   -H "Content-Type: application/json" \
-  -d "{\"value\":false,\"source\":\"${SOURCE}\",\"timestamp\":${TS},\"metadata\":{\"reason\":\"scheduled_force_off\"}}"
+  -d "$payload"

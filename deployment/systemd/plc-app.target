@@ -1,7 +1,0 @@
-[Unit]
-Description=PLC HVAC Application
-Requires=plc-engine.service plc-ui.service
-After=network.target
-
-[Install]
-WantedBy=multi-user.target

@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SYSTEMD_DIR="/etc/systemd/system"
+SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
+ENV_DIR="${ENV_DIR:-/etc/manejadora-app}"
+SERVICE_NAME="manejadora-app.service"
+TARGET_NAME="manejadora-app.target"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_ROOT_DEFAULT="/home/maxia/plc_app"
-APP_ROOT="${APP_ROOT:-$APP_ROOT_DEFAULT}"
+APP_ROOT="${APP_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+SERVICE_USER="${SERVICE_USER:-${SUDO_USER:-$(id -un)}}"
+SERVICE_GROUP="${SERVICE_GROUP:-$(id -gn "$SERVICE_USER" 2>/dev/null || id -gn)}"
+PYTHON_BIN="${PYTHON_BIN:-$APP_ROOT/.venv/bin/python3.12}"
+UNIT_TEMPLATE="$SCRIPT_DIR/$SERVICE_NAME.in"
+UNIT_TMP="$(mktemp)"
 
-ENGINE_SERVICE="plc-engine.service"
-UI_SERVICE="plc-ui.service"
-APP_TARGET="plc-app.target"
-
-ENGINE_ENV_SRC="$SCRIPT_DIR/plc-engine.env.example"
-UI_ENV_SRC="$SCRIPT_DIR/plc-ui.env.example"
-ENGINE_ENV_DST="$APP_ROOT/deployment/systemd/plc-engine.env"
-UI_ENV_DST="$APP_ROOT/deployment/systemd/plc-ui.env"
+cleanup() {
+  rm -f "$UNIT_TMP"
+}
+trap cleanup EXIT
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -29,31 +32,44 @@ require_path() {
   }
 }
 
-echo "[INFO] validating prerequisites"
-require_cmd systemctl
-require_cmd npm
-require_path "$APP_ROOT/.venv/bin/python3.10"
-require_path "$APP_ROOT/plc_hvac/app/main.py"
-require_path "$APP_ROOT/commissioning_ui/package.json"
+render_unit() {
+  sed \
+    -e "s#__APP_ROOT__#$APP_ROOT#g" \
+    -e "s#__SERVICE_USER__#$SERVICE_USER#g" \
+    -e "s#__SERVICE_GROUP__#$SERVICE_GROUP#g" \
+    -e "s#__PYTHON_BIN__#$PYTHON_BIN#g" \
+    "$UNIT_TEMPLATE" > "$UNIT_TMP"
+}
 
-mkdir -p "$APP_ROOT/deployment/systemd"
-[[ -f "$ENGINE_ENV_DST" ]] || cp "$ENGINE_ENV_SRC" "$ENGINE_ENV_DST"
-[[ -f "$UI_ENV_DST" ]] || cp "$UI_ENV_SRC" "$UI_ENV_DST"
+echo "[INFO] validating manejadora-app deployment"
+require_cmd systemctl
+require_cmd sed
+require_path "$UNIT_TEMPLATE"
+require_path "$SCRIPT_DIR/$TARGET_NAME"
+require_path "$SCRIPT_DIR/manejadora-app.env.example"
+require_path "$APP_ROOT/main.py"
+require_path "$APP_ROOT/requirements.txt"
+require_path "$PYTHON_BIN"
+
+mkdir -p "$APP_ROOT/logs" "$APP_ROOT/var" "$ENV_DIR"
+if [[ ! -f "$ENV_DIR/manejadora-app.env" ]]; then
+  install -m 0640 "$SCRIPT_DIR/manejadora-app.env.example" "$ENV_DIR/manejadora-app.env"
+fi
+
+render_unit
 
 echo "[INFO] installing systemd units"
-install -m 0644 "$SCRIPT_DIR/$ENGINE_SERVICE" "$SYSTEMD_DIR/$ENGINE_SERVICE"
-install -m 0644 "$SCRIPT_DIR/$UI_SERVICE" "$SYSTEMD_DIR/$UI_SERVICE"
-install -m 0644 "$SCRIPT_DIR/$APP_TARGET" "$SYSTEMD_DIR/$APP_TARGET"
+install -m 0644 "$UNIT_TMP" "$SYSTEMD_DIR/$SERVICE_NAME"
+install -m 0644 "$SCRIPT_DIR/$TARGET_NAME" "$SYSTEMD_DIR/$TARGET_NAME"
 
 systemctl daemon-reload
-systemctl enable "$ENGINE_SERVICE" "$UI_SERVICE" "$APP_TARGET"
-systemctl start "$APP_TARGET"
+systemctl enable "$SERVICE_NAME" "$TARGET_NAME"
+systemctl restart "$SERVICE_NAME"
 
-echo "[INFO] basic status"
-systemctl --no-pager --full status "$ENGINE_SERVICE" || true
-systemctl --no-pager --full status "$UI_SERVICE" || true
+echo "[INFO] status"
+systemctl --no-pager --full status "$SERVICE_NAME" || true
 
 echo "[INFO] done"
-echo "  journalctl -u $ENGINE_SERVICE -f"
-echo "  journalctl -u $UI_SERVICE -f"
-echo "  systemctl restart $APP_TARGET"
+echo "  journalctl -u $SERVICE_NAME -f"
+echo "  systemctl restart $SERVICE_NAME"
+echo "  systemctl stop $TARGET_NAME"

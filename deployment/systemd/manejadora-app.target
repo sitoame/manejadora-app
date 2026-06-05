@@ -1,0 +1,7 @@
+[Unit]
+Description=Manejadora App HVAC stack
+Wants=network-online.target manejadora-app.service
+After=network-online.target manejadora-app.service
+
+[Install]
+WantedBy=multi-user.target
