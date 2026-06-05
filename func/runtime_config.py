@@ -93,6 +93,9 @@ _ALLOWED_SETTINGS = {
     "temperature_setpoint_default",
     "humidity_setpoint_default",
     "monitor_enabled",
+    "process_restart_max_attempts",
+    "process_restart_backoff_seconds",
+    "process_restart_window_seconds",
 }
 
 # Grupos para filtrado condicional
@@ -357,6 +360,8 @@ def _apply(shared_state, payload: Dict[str, Any]) -> None:
                         continue
                     if sk in {"mqtt_enabled", "ingest_enabled", "raw_ai_microamps", "monitor_enabled"}:
                         st[sk] = _as_bool(sv, bool(st.get(sk, True)))
+                    elif sk == "process_restart_max_attempts":
+                        st[sk] = max(1, int(_as_float(sv, _as_float(st.get(sk, 3), 3))))
                     elif sk == "control_mode":
                         st[sk] = str(sv).upper()
                     else:

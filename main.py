@@ -1,4 +1,5 @@
 import multiprocessing
+from collections import deque
 import os
 import signal
 import sys
@@ -107,6 +108,9 @@ def create_shared_state(manager: multiprocessing.Manager):
                     "temperature_setpoint_default": float(getattr(const, "temperature_setpoint_default", 20.0)),
                     "humidity_setpoint_default": float(getattr(const, "humidity_setpoint_default", 60.0)),
                     "monitor_enabled": bool(getattr(const, "monitor_enabled", True)),
+                    "process_restart_max_attempts": int(getattr(const, "process_restart_max_attempts", 3)),
+                    "process_restart_backoff_seconds": float(getattr(const, "process_restart_backoff_seconds", 2.0)),
+                    "process_restart_window_seconds": float(getattr(const, "process_restart_window_seconds", 300.0)),
                 }
             ),
             "manual_overrides": manager.dict(
@@ -200,6 +204,9 @@ def create_shared_state(manager: multiprocessing.Manager):
                     "alerta_uv": False,
                 }
             ),
+            "safe_mode": False,
+            "safe_mode_reason": "",
+            "process_failures": manager.dict({}),
             "activation_ts": manager.dict(
                 {
                     "fan": 0.0,
@@ -221,12 +228,128 @@ def start_process(target, args, name: str):
     return proc
 
 
+def _restart_limits(shared_state) -> tuple[int, float, float]:
+    settings = shared_state.get("settings") or {}
+    max_attempts = max(1, int(settings.get("process_restart_max_attempts", 3)))
+    backoff_seconds = max(0.1, float(settings.get("process_restart_backoff_seconds", 2.0)))
+    window_seconds = max(backoff_seconds, float(settings.get("process_restart_window_seconds", 300.0)))
+    return max_attempts, backoff_seconds, window_seconds
+
+
+def _activate_safe_mode(shared_state, reason: str) -> None:
+    shared_state["safe_mode"] = True
+    shared_state["safe_mode_reason"] = reason
+    shared_state["on_off_global"] = False
+    try:
+        alarms = shared_state.get("alarms")
+        if alarms is not None:
+            alarms["safe_mode"] = True
+    except Exception:
+        pass
+    print(f"[main] safe_mode activado: {reason}")
+
+
+def _process_specs(shared_state, stop_event):
+    return [
+        {
+            "name": "runtime_config",
+            "target": runtime_config.runtime_config_loop,
+            "args": (shared_state, stop_event),
+            "restart_policy": "always",
+            "critical": False,
+            "failure_count": 0,
+        },
+        {
+            "name": "modbus",
+            "target": modbus.modbus_loop,
+            "args": (shared_state, stop_event),
+            "restart_policy": "always",
+            "critical": True,
+            "failure_count": 0,
+        },
+        {
+            "name": "control",
+            "target": control.control_loop,
+            "args": (shared_state, stop_event),
+            "restart_policy": "always",
+            "critical": True,
+            "failure_count": 0,
+        },
+        {
+            "name": "ingesta",
+            "target": ingesta.ingesta_loop,
+            "args": (shared_state, stop_event),
+            "restart_policy": "always",
+            "critical": False,
+            "failure_count": 0,
+        },
+        {
+            "name": "mqtt",
+            "target": mqtt.mqtt_loop,
+            "args": (shared_state, stop_event),
+            "restart_policy": "always",
+            "critical": False,
+            "failure_count": 0,
+        },
+    ]
+
+
+def _start_spec(spec: dict):
+    spec["proc"] = start_process(spec["target"], spec["args"], spec["name"])
+    spec["pending_restart"] = False
+    spec["restart_blocked"] = False
+
+
+def _record_process_failure(shared_state, spec: dict, now_ts: float) -> tuple[int, int]:
+    max_attempts, backoff_seconds, window_seconds = _restart_limits(shared_state)
+    failures = spec.setdefault("failures", deque())
+    while failures and now_ts - failures[0] > window_seconds:
+        failures.popleft()
+    failures.append(now_ts)
+    spec["failure_count"] = len(failures)
+    spec["next_restart_ts"] = now_ts + backoff_seconds * (2 ** max(0, spec["failure_count"] - 1))
+    try:
+        shared_state["process_failures"][spec["name"]] = spec["failure_count"]
+    except Exception:
+        pass
+    return spec["failure_count"], max_attempts
+
+
+def _supervise_processes(process_specs: list, shared_state, stop_event) -> None:
+    now_ts = time.time()
+    for spec in process_specs:
+        proc = spec.get("proc")
+        if proc is None or proc.is_alive():
+            continue
+        proc.join(timeout=0)
+        if stop_event.is_set() or spec.get("restart_policy") != "always" or spec.get("restart_blocked"):
+            continue
+        if not spec.get("pending_restart"):
+            failures, max_attempts = _record_process_failure(shared_state, spec, now_ts)
+            print(
+                f"[main] Proceso {spec['name']} detenido exitcode={proc.exitcode}; "
+                f"fallos={failures}/{max_attempts}"
+            )
+            if failures > max_attempts:
+                spec["restart_blocked"] = True
+                if spec.get("critical"):
+                    _activate_safe_mode(shared_state, f"process_failed:{spec['name']}")
+                else:
+                    print(f"[main] Límite de restart superado para {spec['name']}; no se reiniciará")
+                continue
+            print(f"[main] Restart de {spec['name']} programado en {spec['next_restart_ts'] - now_ts:.1f}s")
+            spec["pending_restart"] = True
+        if spec.get("pending_restart") and now_ts >= spec.get("next_restart_ts", now_ts):
+            print(f"[main] Reiniciando proceso {spec['name']} con backoff exponencial")
+            _start_spec(spec)
+
+
 def main():
     manager = multiprocessing.Manager()
     shared_state = create_shared_state(manager)
     stop_event = multiprocessing.Event()
     stop_called = False
-    processes = []
+    process_specs = []
 
     # Precarga runtime_config.json antes de lanzar procesos para respetar flags como mqtt/ingest_enabled
     try:
@@ -237,12 +360,13 @@ def main():
         print(f"[main] No se pudo precargar runtime_config.json: {exc}")
 
     def _stop(signum=None, frame=None):
-        nonlocal stop_called, processes
+        nonlocal stop_called, process_specs
         if stop_called:
             print(f"[main] Segunda señal ({signum}), forzando cierre...")
-            for proc in processes:
+            for spec in process_specs:
+                proc = spec.get("proc")
                 try:
-                    if proc.is_alive():
+                    if proc and proc.is_alive():
                         proc.kill()
                 except Exception:
                     pass
@@ -254,20 +378,27 @@ def main():
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
 
-    processes = [
-        start_process(runtime_config.runtime_config_loop, (shared_state, stop_event), "runtime_config"),
-        start_process(modbus.modbus_loop, (shared_state, stop_event), "modbus"),
-        start_process(control.control_loop, (shared_state, stop_event), "control"),
-        start_process(ingesta.ingesta_loop, (shared_state, stop_event), "ingesta"),
-        start_process(mqtt.mqtt_loop, (shared_state, stop_event), "mqtt"),
-    ]
+    process_specs = _process_specs(shared_state, stop_event)
 
     try:
         from func import monitor
 
-        processes.append(start_process(monitor.monitor_loop, (shared_state, stop_event), "monitor"))
+        process_specs.append(
+            {
+                "name": "monitor",
+                "target": monitor.monitor_loop,
+                "args": (shared_state, stop_event),
+                "restart_policy": "always",
+                "critical": False,
+                "failure_count": 0,
+            }
+        )
     except Exception as exc:
         print(f"[main] Monitor HTTP no iniciado: {exc}")
+
+    for spec in process_specs:
+        spec["failures"] = deque()
+        _start_spec(spec)
 
     print("[main] Manejadora en ejecución. Para pruebas locales puedes editar func/modbus.py y setear FORCED_INPUTS.")
     try:
@@ -278,11 +409,15 @@ def main():
 
     try:
         while not stop_event.is_set():
+            _supervise_processes(process_specs, shared_state, stop_event)
             time.sleep(1)
     except KeyboardInterrupt:
         _stop(signal.SIGINT, None)
     finally:
-        for proc in processes:
+        for spec in process_specs:
+            proc = spec.get("proc")
+            if proc is None:
+                continue
             proc.join(timeout=5)
             if proc.is_alive():
                 print(f"[main] Proceso {proc.name} aún activo, se intentará terminar.")

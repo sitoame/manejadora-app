@@ -71,3 +71,8 @@ oa_damper_voltage_off = 0.0
 uv_status_timeout_seconds = 20.0
 valve_vfd_track_tol = 0.8
 valve_vfd_track_timeout_seconds = 20.0
+
+# Supervisión de procesos
+process_restart_max_attempts = 3
+process_restart_backoff_seconds = 2.0
+process_restart_window_seconds = 300.0
