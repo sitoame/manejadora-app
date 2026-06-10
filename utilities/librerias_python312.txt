@@ -1,0 +1,15 @@
+# Librerías Python 3.12 para manejadora_app
+# Generado desde imports reales del proyecto.
+# Instalación sugerida:
+#   python3.12 -m pip install -U pip
+#   python3.12 -m pip install -r utilities/librerias_python312.txt
+
+# --- Dependencias runtime obligatorias ---
+influxdb-client>=1.43.0
+paho-mqtt>=1.6.1
+pyserial>=3.5
+uModbus>=1.0.4
+
+# --- Opcionales de trabajo/desarrollo (no obligatorias en producción) ---
+# pytest>=8.0.0
+# flake8>=7.0.0

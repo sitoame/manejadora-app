@@ -1,0 +1,6 @@
+__pycache__/
+my_venv/
+var/runtime_config.json
+logs/status.json
+logs/*.json
+var/*.json

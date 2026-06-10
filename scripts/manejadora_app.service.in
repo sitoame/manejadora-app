@@ -1,0 +1,18 @@
+[Unit]
+Description=Manejadora App controller
+After=network-online.target
+Wants=network-online.target
+PartOf=manejadora_app.target
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+Group=__SERVICE_GROUP__
+WorkingDirectory=__APP_ROOT__
+EnvironmentFile=-__ENV_FILE__
+ExecStart=__PYTHON_BIN__ -W ignore:semaphore_tracker:UserWarning -u __APP_ROOT__/main.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

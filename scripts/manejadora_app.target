@@ -1,0 +1,6 @@
+[Unit]
+Description=Manejadora App target
+Wants=manejadora_app.service
+
+[Install]
+WantedBy=multi-user.target
