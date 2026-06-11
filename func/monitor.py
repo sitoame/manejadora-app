@@ -150,6 +150,7 @@ def snapshot_state(shared_state) -> dict:
         },
         "registers": _sanitize_json(_registers_snapshot(shared_state)),
         "calendar": _sanitize_json(dict(shared_state.get("calendar", {}))),
+        "reset_auto": _sanitize_json(dict(shared_state.get("reset_auto", {}))),
         "ts": time.time(),
     }
 

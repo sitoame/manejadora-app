@@ -66,7 +66,7 @@ _ALLOWED_SETTINGS = {
     "feedback_tolerance_volts",
     "vfd_tracking_timeout_seconds",
     "vfd_speed_command_pct",
-    "vfd_speed_command_volts",  # legado: si aparece, se convierte a porcentaje
+    "vfd_speed_command_volts",
     "valve_vfd_track_tol",
     "valve_vfd_track_timeout_seconds",
 
@@ -96,6 +96,13 @@ _ALLOWED_SETTINGS = {
     "supply_high_temp_alarm_enabled",
     "supply_high_temp_alarm_threshold_c",
     "supply_high_temp_alarm_delay_seconds",
+
+    # Reset automatico
+    "reset_auto_enabled",
+    "reset_auto_poll_seconds",
+    "reset_auto_pulse_seconds",
+    "reset_auto_clear_grace_seconds",
+    "reset_auto_total_shutdown_alarms",
 }
 
 # Grupos para filtrado condicional
@@ -134,6 +141,8 @@ _SUPPLY_TEMP_ALARM_SETTINGS: Set[str] = {
     "supply_high_temp_alarm_threshold_c",
     "supply_high_temp_alarm_delay_seconds",
 }
+_RESET_AUTO_BOOL_SETTINGS: Set[str] = {"reset_auto_enabled"}
+_RESET_AUTO_SEQUENCE_SETTINGS: Set[str] = {"reset_auto_total_shutdown_alarms"}
 
 # Overrides manuales
 _OVERRIDE_ALWAYS: Set[str] = {"fan", "heater"}
@@ -146,6 +155,14 @@ def _as_float(v: Any, default: float = 0.0) -> float:
         return float(v)
     except Exception:
         return default
+
+
+def _normalize_string_list(value: Any) -> list:
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
 
 
 def _as_bool(v: Any, default: bool = False) -> bool:
@@ -277,6 +294,10 @@ def _feature_filtered_settings(settings: Dict[str, Any], tipico_id: int) -> Dict
 
     if "control_mode" in filtered:
         filtered["control_mode"] = str(filtered.get("control_mode", "TEMP_HUM")).upper()
+    if "reset_auto_total_shutdown_alarms" in filtered:
+        filtered["reset_auto_total_shutdown_alarms"] = _normalize_string_list(
+            filtered.get("reset_auto_total_shutdown_alarms")
+        )
 
     return filtered
 
@@ -367,6 +388,12 @@ def _apply(shared_state, payload: Dict[str, Any]) -> None:
                         continue
                     if sk in {"mqtt_enabled", "ingest_enabled", "raw_ai_microamps", "monitor_enabled"}:
                         st[sk] = _as_bool(sv, bool(st.get(sk, True)))
+                    elif sk in _RESET_AUTO_BOOL_SETTINGS:
+                        st[sk] = _as_bool(sv, bool(st.get(sk, True)))
+                    elif sk in _RESET_AUTO_SEQUENCE_SETTINGS:
+                        normalized = _normalize_string_list(sv)
+                        if normalized:
+                            st[sk] = normalized
                     elif sk == "control_mode":
                         st[sk] = str(sv).upper()
                     else:

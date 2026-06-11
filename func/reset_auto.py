@@ -1,12 +1,16 @@
+"""Supervisor de reset automatico para alarmas criticas.
+
+El loop observa alarmas de paro total y emite un pulso en ``resets["all"]``
+cuando se cumple la ventana configurada. Tambien publica telemetria en
+``shared_state["reset_auto"]`` para monitor y MQTT.
+"""
+
 import signal
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Set, Tuple
 
-try:
-    from var import const
-except Exception:  # pragma: no cover - defensivo
-    const = None
+from var import const
 
 
 DEFAULT_TOTAL_SHUTDOWN_ALARMS = (
@@ -256,6 +260,7 @@ def reset_auto_loop(shared_state, stop_event, poll_seconds: float = None) -> Non
         now = time.time()
         try:
             settings = _shared_get(shared_state, "settings") or {}
+            poll = max(0.25, _safe_float(settings.get("reset_auto_poll_seconds", poll), poll))
             enabled = _safe_bool(settings.get("reset_auto_enabled", ENABLED_DEFAULT), ENABLED_DEFAULT)
             pulse_seconds = max(
                 0.1,

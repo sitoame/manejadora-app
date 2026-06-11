@@ -6,7 +6,7 @@ import time
 import json
 from pathlib import Path
 
-from func import calendario, control, ingesta, modbus, mqtt, runtime_config
+from func import calendario, control, ingesta, modbus, mqtt, reset_auto, runtime_config
 from var import const
 from var import tipicos
 
@@ -114,6 +114,15 @@ def create_shared_state(manager: multiprocessing.Manager):
                     "supply_high_temp_alarm_delay_seconds": float(
                         getattr(const, "supply_high_temp_alarm_delay_seconds", 60.0)
                     ),
+                    "reset_auto_enabled": bool(getattr(const, "reset_auto_enabled", True)),
+                    "reset_auto_poll_seconds": float(getattr(const, "reset_auto_poll_seconds", 1.0)),
+                    "reset_auto_pulse_seconds": float(getattr(const, "reset_auto_pulse_seconds", 2.0)),
+                    "reset_auto_clear_grace_seconds": float(
+                        getattr(const, "reset_auto_clear_grace_seconds", 300.0)
+                    ),
+                    "reset_auto_total_shutdown_alarms": list(
+                        getattr(reset_auto, "DEFAULT_TOTAL_SHUTDOWN_ALARMS", ())
+                    ),
                 }
             ),
             "manual_overrides": manager.dict(
@@ -148,7 +157,6 @@ def create_shared_state(manager: multiprocessing.Manager):
             ),
             "sensors": manager.dict(
                 {
-                    # Legacy
                     "supply_temp": 0.0,
                     "return_temp": 0.0,
                     "humidity": 0.0,
@@ -178,7 +186,6 @@ def create_shared_state(manager: multiprocessing.Manager):
             ),
             "actuators": manager.dict(
                 {
-                    # Legacy
                     "fan": False,
                     "heater": 0.0,
                     # Canónico típicos
@@ -192,7 +199,6 @@ def create_shared_state(manager: multiprocessing.Manager):
             ),
             "alarms": manager.dict(
                 {
-                    # Legacy
                     "fan": False,
                     "heater": False,
                     # Típicos
@@ -230,6 +236,21 @@ def create_shared_state(manager: multiprocessing.Manager):
                     "cycle_seconds": float(calendario.CICLO_SEGUNDOS),
                     "on_delay_seconds": float(calendario.RETARDO_ENCENDIDO_SEG),
                     "off_delay_seconds": float(calendario.RETARDO_APAGADO_SEG),
+                    "ts": 0.0,
+                }
+            ),
+            "reset_auto": manager.dict(
+                {
+                    "enabled": bool(getattr(const, "reset_auto_enabled", True)),
+                    "active": False,
+                    "active_alarm_keys": [],
+                    "first_alarm_ts": 0.0,
+                    "last_active_ts": 0.0,
+                    "last_reset_ts": 0.0,
+                    "resets_done": 0,
+                    "next_reset_ts": 0.0,
+                    "seconds_to_next_reset": 0.0,
+                    "pulse_active": False,
                     "ts": 0.0,
                 }
             ),
@@ -289,6 +310,7 @@ def main():
         start_process(calendario.calendario_loop, (shared_state, stop_event), "calendario"),
         start_process(modbus.modbus_loop, (shared_state, stop_event), "modbus"),
         start_process(control.control_loop, (shared_state, stop_event), "control"),
+        start_process(reset_auto.reset_auto_loop, (shared_state, stop_event), "reset_auto"),
         start_process(ingesta.ingesta_loop, (shared_state, stop_event), "ingesta"),
         start_process(mqtt.mqtt_loop, (shared_state, stop_event), "mqtt"),
     ]

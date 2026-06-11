@@ -79,3 +79,18 @@ supply_high_temp_alarm_delay_seconds = 120.0
 
 # Calendario operativo editable por /api/horario
 horario_config_file = "var/horario.json"
+
+# Reset automatico de alarmas criticas
+reset_auto_enabled = True
+reset_auto_poll_seconds = 1.0
+reset_auto_pulse_seconds = 2.0
+reset_auto_clear_grace_seconds = 300.0
+reset_auto_total_shutdown_alarms = (
+    "fan",
+    "alerta_ventilador",
+    "interlock_humo",
+    "interlock_termica",
+    "interlock_vfd",
+    "interlock_temp_suministro_alta",
+)
+

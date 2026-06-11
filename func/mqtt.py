@@ -443,6 +443,8 @@ def publish_status(client: mqtt.Client, shared_state) -> None:
             "setpoints": dict(shared_state.get("setpoints", {})),
             "outputs": dict(shared_state.get("actuators", {})),
             "sensors": dict(shared_state.get("sensors", {})),
+            "alarms": dict(shared_state.get("alarms", {})),
+            "reset_auto": dict(shared_state.get("reset_auto", {})),
         }
         client.publish(TOPIC_STATUS, json.dumps(payload), qos=0, retain=False)
     except Exception as exc:  # pragma: no cover - runtime
