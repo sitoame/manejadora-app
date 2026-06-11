@@ -136,16 +136,16 @@ SENSOR_FIELD_MAP = {
 
 # Entradas discretas que ya tienen una alarma lógica más clara en la ingesta.
 RAW_SENSOR_EXCLUDE = {
-    "estatus_ventilador",
-    "detector_humo",
-    "alarma_vfd",
+    # "estatus_ventilador",
+    # "detector_humo",
+    # "alarma_vfd",
     "alarma_termica",
     "posicion_automatico",
     "posicion_manual",
     "estatus_luz_ultravioleta",
-    "status_ups",
-    "alarma_ups",
-    "battery_disch",
+    # "status_ups",
+    # "alarma_ups",
+    # "battery_disch",
 }
 
 ACTUATOR_FIELD_MAP = {
