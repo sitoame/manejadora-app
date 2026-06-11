@@ -36,9 +36,15 @@ Por default:
 ```bash
 cd /ruta/manejadora_app
 python3.12 -m venv my_venv
+date
+sudo timedatectl set-ntp true
+sudo systemctl restart systemd-timesyncd
+timedatectl
 ./my_venv/bin/python -m pip install --upgrade pip
 ./my_venv/bin/python -m pip install -r requirements.txt
 chmod +x scripts/install.sh scripts/uninstall.sh
+sudo usermod -aG dialout dynatek
+sudo chown -R dynatek:dynatek /home/dynatek/manejadora_app/logs && sudo chmod 775 /home/dynatek/manejadora_app/logs
 ```
 
 El servicio necesita permisos de lectura y escritura sobre `logs/` y `var/`, además de acceso al puerto Modbus configurado en `var/const.py` cuando `use_modbus_hw = True`.
