@@ -1,6 +1,7 @@
 __pycache__/
 my_venv/
 var/runtime_config.json
+!logs/.gitkeep
 logs/status.json
 logs/*.json
 logs/*.log
