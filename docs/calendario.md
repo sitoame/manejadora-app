@@ -37,7 +37,7 @@ La ruta se define en `var/const.py` mediante `horario_config_file`. Si el archiv
 ## Consultar el horario actual
 
 ```bash
-curl -u dynatek:dynatek http://localhost:8088/api/horario
+curl -u dynatek:dynatek http://192.168.30.13:8088/api/horario
 ```
 
 Respuesta resumida:
@@ -61,7 +61,7 @@ Respuesta resumida:
   },
   "excepciones_fecha": {},
   "eventos_prioritarios": [],
-  "archivo": "/ruta/proyecto/var/horario.json"
+  "archivo": "/home/dynatek/manejadora_app/var/horario.json"
 }
 ```
 
@@ -72,7 +72,7 @@ Enviar `POST /api/horario` con JSON. La API valida el payload, lo aplica en cali
 ```bash
 curl -u dynatek:dynatek \
   -H 'Content-Type: application/json' \
-  -X POST http://localhost:8088/api/horario \
+  -X POST http://192.168.30.13:8088/api/horario \
   -d '{
     "calendario_habilitado": true,
     "zona_horaria": "America/Panama",
@@ -81,13 +81,30 @@ curl -u dynatek:dynatek \
     "retardo_apagado_seg": 0,
     "estado_fuera_de_horario": false,
     "horario_semanal": {
-      "LUN": [["06:00", "18:00"]],
-      "MAR": [["06:00", "18:00"]],
-      "MIE": [["06:00", "18:00"]],
-      "JUE": [["06:00", "18:00"]],
-      "VIE": [["06:00", "18:00"]],
-      "SAB": [],
-      "DOM": []
+      "LUN": [["00:00", "24:00"]],
+      "MAR": [["00:00", "24:00"]],
+      "MIE": [["00:00", "24:00"]],
+      "JUE": [["00:00", "24:00"]],
+      "VIE": [["00:00", "24:00"]],
+      "SAB": [["00:00", "24:00"]],
+      "DOM": [["00:00", "24:00"]]
+    }
+  }'
+```
+
+```bash
+curl -u dynatek:dynatek \
+  -H 'Content-Type: application/json' \
+  -X POST http://192.168.30.13:8088/api/horario \
+  -d '{
+    "calendario_habilitado": true,
+    "zona_horaria": "America/Panama",
+    "ciclo_segundos": 10,
+    "retardo_encendido_seg": 0,
+    "retardo_apagado_seg": 0,
+    "estado_fuera_de_horario": false,
+    "horario_semanal": {
+      "JUE": [["06:00", "14:00"]],
     }
   }'
 ```
