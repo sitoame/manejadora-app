@@ -11,6 +11,7 @@ Group=__SERVICE_GROUP__
 WorkingDirectory=__APP_ROOT__
 EnvironmentFile=-__ENV_FILE__
 ExecStart=__PYTHON_BIN__ -W ignore:semaphore_tracker:UserWarning -u __APP_ROOT__/main.py
+StandardOutput=append:/home/dynatek/manejadora_app/logs/manejadora_app.log
 Restart=always
 RestartSec=3
 

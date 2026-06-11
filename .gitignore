@@ -3,4 +3,5 @@ my_venv/
 var/runtime_config.json
 logs/status.json
 logs/*.json
+logs/*.log
 var/*.json
