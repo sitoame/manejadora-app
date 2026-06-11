@@ -76,3 +76,6 @@ valve_vfd_track_timeout_seconds = 20.0
 supply_high_temp_alarm_enabled = True
 supply_high_temp_alarm_threshold_c = 24.0
 supply_high_temp_alarm_delay_seconds = 120.0
+
+# Calendario operativo editable por /api/horario
+horario_config_file = "var/horario.json"

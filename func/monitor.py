@@ -11,7 +11,7 @@ from urllib.parse import urlparse, parse_qs
 
 import os
 
-from func import runtime_config
+from func import calendario, runtime_config
 try:
     from var import const
 except Exception:  # pragma: no cover
@@ -115,6 +115,13 @@ def _runtime_snapshot(shared_state) -> dict:
         return {}
 
 
+def _horario_snapshot(load_file: bool = False) -> dict:
+    try:
+        return calendario.get_horario_config(load_file=load_file)
+    except Exception as exc:
+        return {"error": "horario_snapshot_error", "detail": str(exc)}
+
+
 def snapshot_state(shared_state) -> dict:
     enabled = bool(shared_state.get("on_off_global", True))
     tipico_id = int(shared_state.get("tipico", getattr(tipicos, "DEFAULT_TIPICO", 1)))
@@ -142,6 +149,7 @@ def snapshot_state(shared_state) -> dict:
             "actuators": sorted(required["required_actuators"]),
         },
         "registers": _sanitize_json(_registers_snapshot(shared_state)),
+        "calendar": _sanitize_json(dict(shared_state.get("calendar", {}))),
         "ts": time.time(),
     }
 
@@ -498,6 +506,9 @@ def _build_handler(shared_state):
             if parsed.path == "/api/runtime":
                 self._json(_runtime_snapshot(shared_state))
                 return
+            if parsed.path == "/api/horario":
+                self._json(_horario_snapshot(load_file=True))
+                return
             if parsed.path == "/api/registers":
                 query = parse_qs(parsed.query)
                 selected_slave = query.get("slave_id", [None])[0]
@@ -548,6 +559,34 @@ def _build_handler(shared_state):
                 runtime_config._apply(shared_state, sanitized)
                 snapshot = _runtime_snapshot(shared_state)
                 self._json({"ok": True, "runtime": snapshot, "ts": time.time()})
+                return
+            if parsed.path == "/api/horario":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                except Exception:
+                    length = 0
+                if length > 16384:
+                    self._json({"error": "payload_too_large"}, status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+                    return
+                raw = self.rfile.read(length) if length > 0 else b"{}"
+                try:
+                    payload = json.loads(raw.decode("utf-8") or "{}")
+                except Exception:
+                    self._json({"error": "bad_json"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                if not isinstance(payload, dict):
+                    self._json({"error": "payload_must_be_object"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    snapshot = calendario.apply_horario_config(payload, persist=True)
+                    calendario.apply_calendar_once(shared_state)
+                except ValueError as exc:
+                    self._json({"error": "invalid_horario", "detail": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                except Exception as exc:
+                    self._json({"error": "horario_apply_error", "detail": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                    return
+                self._json({"ok": True, "horario": snapshot, "calendar": dict(shared_state.get("calendar", {})), "ts": time.time()})
                 return
             if parsed.path == "/api/force":
                 try:

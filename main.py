@@ -6,7 +6,7 @@ import time
 import json
 from pathlib import Path
 
-from func import control, ingesta, modbus, mqtt, runtime_config
+from func import calendario, control, ingesta, modbus, mqtt, runtime_config
 from var import const
 from var import tipicos
 
@@ -218,6 +218,21 @@ def create_shared_state(manager: multiprocessing.Manager):
                     "temp_suministro_alta": 0.0,
                 }
             ),
+            "calendar": manager.dict(
+                {
+                    "enabled": False,
+                    "request": False,
+                    "q": True,
+                    "source": "INIT",
+                    "detail": "calendario no evaluado",
+                    "now_local": "",
+                    "timezone": calendario.ZONA_HORARIA,
+                    "cycle_seconds": float(calendario.CICLO_SEGUNDOS),
+                    "on_delay_seconds": float(calendario.RETARDO_ENCENDIDO_SEG),
+                    "off_delay_seconds": float(calendario.RETARDO_APAGADO_SEG),
+                    "ts": 0.0,
+                }
+            ),
         }
     )
 
@@ -237,13 +252,19 @@ def main():
     stop_called = False
     processes = []
 
-    # Precarga runtime_config.json antes de lanzar procesos para respetar flags como mqtt/ingest_enabled
+    # init cfg antes de lanzar procesos para respetar flags y horario operativo
     try:
         applied = runtime_config.apply_runtime_config_once(shared_state)
         if applied:
             print("[main] runtime_config.json aplicado antes de iniciar procesos.")
     except Exception as exc:
         print(f"[main] No se pudo precargar runtime_config.json: {exc}")
+
+    try:
+        calendario.apply_calendar_once(shared_state)
+        print("[main] Calendario operativo aplicado antes de iniciar procesos.")
+    except Exception as exc:
+        print(f"[main] No se pudo precargar calendario operativo: {exc}")
 
     def _stop(signum=None, frame=None):
         nonlocal stop_called, processes
@@ -265,6 +286,7 @@ def main():
 
     processes = [
         start_process(runtime_config.runtime_config_loop, (shared_state, stop_event), "runtime_config"),
+        start_process(calendario.calendario_loop, (shared_state, stop_event), "calendario"),
         start_process(modbus.modbus_loop, (shared_state, stop_event), "modbus"),
         start_process(control.control_loop, (shared_state, stop_event), "control"),
         start_process(ingesta.ingesta_loop, (shared_state, stop_event), "ingesta"),
