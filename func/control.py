@@ -4,7 +4,7 @@ from typing import Dict, Any, Tuple
 
 from var import const
 from var import tipicos
-from func.runtime_config import allowed_keys_for_tipico
+from func.pid import PIDController
 
 # PID y umbrales (configurables en const.py)
 TEMP_STAGE1_DELTA = getattr(const, "temp_stage1_delta", 0.2)
@@ -80,28 +80,6 @@ HEATER_MAX_AUTO = clamp(
     0.0,
     HEATER_MAX,
 )
-
-def pid_step(error: float, state: Dict[str, float], params: Dict[str, float], dt: float, out_min: float, out_max: float) -> float:
-    """PID simple con anti-windup: no integra cuando está saturado."""
-    kp = params.get("kp", 0.0)
-    ki = params.get("ki", 0.0)
-    kd = params.get("kd", 0.0)
-
-    prev = state.get("prev", 0.0)
-    integ = state.get("int", 0.0)
-    deriv = (error - prev) / dt if dt > 0 else 0.0
-
-    integ_candidate = integ + error * dt
-    output = kp * error + ki * integ_candidate + kd * deriv
-    output_clamped = clamp(output, out_min, out_max)
-
-    # Anti-windup: solo aceptamos la nueva integral si no se saturó
-    if output_clamped == output:
-        integ = integ_candidate
-
-    state["prev"] = error
-    state["int"] = integ
-    return output_clamped
 
 
 def apply_min_cycle(
@@ -426,6 +404,134 @@ def _track_alert(
         alarms[alarm_key] = True
 
 
+def _pid_pool(shared_state) -> Dict[str, PIDController]:
+    pool = shared_state.get("_pid_controllers")
+    if not isinstance(pool, dict):
+        pool = {}
+        shared_state["_pid_controllers"] = pool
+    return pool
+
+
+def _pid_params_changed(pid: PIDController, kp: float, ki: float, kd: float, setpoint: float, limits: Tuple[float, float], deadband: float) -> bool:
+    return (
+        pid.Kp != kp
+        or pid.Ki != ki
+        or pid.Kd != kd
+        or pid.setpoint != setpoint
+        or pid.output_limits != limits
+        or pid.deadband != deadband
+    )
+
+
+def _get_pid(
+    shared_state,
+    key: str,
+    kp: float,
+    ki: float,
+    kd: float,
+    setpoint: float,
+    output_limits: Tuple[float, float],
+    initial_output: float,
+    sample_time: float,
+    deadband: float,
+    output_step: float,
+    max_delta: float,
+    direction: str,
+) -> PIDController:
+    pool = _pid_pool(shared_state)
+    pid = pool.get(key)
+    if pid is None:
+        pid = PIDController(
+            kp,
+            ki,
+            kd,
+            setpoint,
+            sample_time=sample_time,
+            output_limits=output_limits,
+            initial_output=initial_output,
+            deadband=deadband,
+            output_step=output_step,
+            max_delta=max_delta,
+            direction=direction,
+            name=key,
+        )
+        pool[key] = pid
+        return pid
+
+    if _pid_params_changed(pid, kp, ki, kd, setpoint, output_limits, deadband):
+        pid.Kp = kp
+        pid.Ki = ki
+        pid.Kd = kd
+        pid.setpoint = setpoint
+        pid.output_limits = output_limits
+        pid.deadband = deadband
+    pid.sample_time = sample_time
+    pid.output_step = output_step
+    pid.max_delta_output = max_delta
+    pid.set_direction(direction)
+    return pid
+
+
+def _valve_pid_command(shared_state, now: float, ret_t: float, sp_t: float) -> float:
+    actuators = shared_state.get("actuators") or {}
+    activation_ts = shared_state.get("activation_ts") or {}
+    settings = shared_state.get("settings") or {}
+
+    hold_s = max(5.0, _safe_float(settings.get("valve_min_output_hold_time_seconds", getattr(const, "valve_min_output_hold_time_seconds", 30.0)), 30.0))
+    kp = _safe_float(settings.get("valve_pid_kp", getattr(const, "valve_pid_kp", 1.2)), 1.2)
+    ki = _safe_float(settings.get("valve_pid_ki", getattr(const, "valve_pid_ki", 0.0)), 0.0)
+    kd = _safe_float(settings.get("valve_pid_kd", getattr(const, "valve_pid_kd", 0.0)), 0.0)
+    deadband = _safe_float(settings.get("valve_deadband_c", getattr(const, "valve_deadband_c", 0.2)), 0.2)
+    output_step = _safe_float(settings.get("valve_pid_output_step", getattr(const, "valve_pid_output_step", 0.1)), 0.1)
+    max_delta = _safe_float(settings.get("valve_pid_max_delta", getattr(const, "valve_pid_max_delta", 10.0)), 10.0)
+    current_valve = _safe_float(actuators.get("control_valvula", 0.0), 0.0)
+
+    pid = _get_pid(
+        shared_state,
+        "valve",
+        kp,
+        ki,
+        kd,
+        sp_t,
+        (0.0, 10.0),
+        current_valve,
+        0.0,
+        deadband,
+        output_step,
+        max_delta,
+        "reverse",
+    )
+    desired_valve = pid.update(ret_t)
+    if desired_valve is None:
+        desired_valve = current_valve
+
+    last_ts = activation_ts.get("_valve_hold_ts", 0.0)
+    if last_ts == 0.0 or (now - last_ts) >= hold_s:
+        activation_ts["_valve_hold_ts"] = now
+        return clamp(desired_valve, 0.0, 10.0)
+    return current_valve
+
+
+def _pid_output(shared_state, key: str, params: Dict[str, float], setpoint: float, measured: float, output_max: float, direction: str = "direct") -> float:
+    pid = _get_pid(
+        shared_state,
+        key,
+        float(params.get("kp", 0.0)),
+        float(params.get("ki", 0.0)),
+        float(params.get("kd", 0.0)),
+        setpoint,
+        (0.0, output_max),
+        0.0,
+        0.0,
+        0.0,
+        0.1,
+        output_max,
+        direction,
+    )
+    output = pid.update(measured)
+    return 0.0 if output is None else clamp(output, 0.0, output_max)
+
+
 def _run_tipico_1_2(shared_state, now: float) -> None:
     sensors = shared_state.get("sensors")
     actuators = shared_state.get("actuators")
@@ -478,43 +584,8 @@ def _run_tipico_1_2(shared_state, now: float) -> None:
     valve_tracking_timeout = _safe_float(settings.get("valve_tracking_timeout_seconds", 60.0), 60.0)
     vfd_tracking_timeout = _safe_float(settings.get("vfd_tracking_timeout_seconds", 60.0), 60.0)
 
-    # PID de válvula con hold-time mínimo (no cambiar cada ciclo).
-    hold_s = max(5.0, _safe_float(settings.get("valve_min_output_hold_time_seconds", getattr(const, "valve_min_output_hold_time_seconds", 30.0)), 30.0))
-    kp = _safe_float(settings.get("valve_pid_kp", getattr(const, "valve_pid_kp", 1.2)), 1.2)
-    ki = _safe_float(settings.get("valve_pid_ki", getattr(const, "valve_pid_ki", 0.0)), 0.0)
-    kd = _safe_float(settings.get("valve_pid_kd", getattr(const, "valve_pid_kd", 0.0)), 0.0)
-    deadband = _safe_float(settings.get("valve_deadband_c", getattr(const, "valve_deadband_c", 0.2)), 0.2)
-
-    current_valve = _safe_float(actuators.get("control_valvula", 0.0))
-    err = ret_t - sp_t
-
-    prev_err = _safe_float(activation_ts.get("_valve_prev_err", 0.0), 0.0)
-    integ = _safe_float(activation_ts.get("_valve_i", 0.0), 0.0)
-    last_pid_ts = _safe_float(activation_ts.get("_valve_prev_ts", 0.0), 0.0)
-    dt = max(1e-3, now - last_pid_ts) if last_pid_ts else 1.0
-
-    if abs(err) <= deadband:
-        desired_valve = current_valve
-        integ = 0.0
-    else:
-        integ_candidate = integ + err * dt
-        deriv = (err - prev_err) / dt
-        raw = current_valve + (kp * err) + (ki * integ_candidate) + (kd * deriv)
-        desired_valve = clamp(raw, 0.0, 10.0)
-        # anti-windup básico
-        if 0.0 < desired_valve < 10.0:
-            integ = integ_candidate
-
-    activation_ts["_valve_prev_err"] = err
-    activation_ts["_valve_i"] = integ
-    activation_ts["_valve_prev_ts"] = now
-
-    last_ts = activation_ts.get("_valve_hold_ts", 0.0)
-    if last_ts == 0.0 or (now - last_ts) >= hold_s:
-        valve_cmd = desired_valve
-        activation_ts["_valve_hold_ts"] = now
-    else:
-        valve_cmd = current_valve
+    # PID genérico de válvula con hold-time mínimo.
+    valve_cmd = _valve_pid_command(shared_state, now, ret_t, sp_t)
 
     run_request = on_global and pos_auto
     if features.get("usa_auto_manual", False) and pos_manual:
@@ -645,51 +716,17 @@ def _run_tipico_vfd_valve(shared_state, now: float, features: Dict[str, Any]) ->
     alarms["interlock_humo"] = smoke
     alarms["interlock_vfd"] = vfd_alarm
 
+    ret_t = _safe_float(sensors.get("temperatura_retorno", 0.0), 0.0)
+    sp_t = _safe_float(setpoints.get("temperature", 20.0), 20.0)
+
     run_request = on_global and not smoke and not supply_high_temp_fault
 
     # Fan / VFD commands
     vfd_cmd = run_request and not vfd_alarm
     vfd_sp = _vfd_speed_command_pct(settings) if vfd_cmd else 0.0
 
-    # Valve PID (como típico 1/2)
-    ret_t = _safe_float(sensors.get("temperatura_retorno", 0.0), 0.0)
-    sp_t = _safe_float(setpoints.get("temperature", 20.0), 20.0)
-    valve_fb = _safe_float(sensors.get("retroalimentacion_valvula", 0.0), 0.0)
-    hold_s = max(5.0, _safe_float(settings.get("valve_min_output_hold_time_seconds", getattr(const, "valve_min_output_hold_time_seconds", 30.0)), 30.0))
-    kp = _safe_float(settings.get("valve_pid_kp", getattr(const, "valve_pid_kp", 1.2)), 1.2)
-    ki = _safe_float(settings.get("valve_pid_ki", getattr(const, "valve_pid_ki", 0.0)), 0.0)
-    kd = _safe_float(settings.get("valve_pid_kd", getattr(const, "valve_pid_kd", 0.0)), 0.0)
-    deadband = _safe_float(settings.get("valve_deadband_c", getattr(const, "valve_deadband_c", 0.2)), 0.2)
-
-    current_valve = _safe_float(actuators.get("control_valvula", 0.0))
-    err = ret_t - sp_t
-
-    prev_err = _safe_float(activation_ts.get("_valve_prev_err", 0.0), 0.0)
-    integ = _safe_float(activation_ts.get("_valve_i", 0.0), 0.0)
-    last_pid_ts = _safe_float(activation_ts.get("_valve_prev_ts", 0.0), 0.0)
-    dt = max(1e-3, now - last_pid_ts) if last_pid_ts else 1.0
-
-    if abs(err) <= deadband:
-        desired_valve = current_valve
-        integ = 0.0
-    else:
-        integ_candidate = integ + err * dt
-        deriv = (err - prev_err) / dt
-        raw = current_valve + (kp * err) + (ki * integ_candidate) + (kd * deriv)
-        desired_valve = clamp(raw, 0.0, 10.0)
-        if 0.0 < desired_valve < 10.0:
-            integ = integ_candidate
-
-    activation_ts["_valve_prev_err"] = err
-    activation_ts["_valve_i"] = integ
-    activation_ts["_valve_prev_ts"] = now
-
-    last_ts = activation_ts.get("_valve_hold_ts", 0.0)
-    if last_ts == 0.0 or (now - last_ts) >= hold_s:
-        valve_cmd = desired_valve
-        activation_ts["_valve_hold_ts"] = now
-    else:
-        valve_cmd = current_valve
+    # PID genérico de válvula.
+    valve_cmd = _valve_pid_command(shared_state, now, ret_t, sp_t)
 
     # Fan feedback confirmation
     fan_timeout = _safe_float(settings.get("fan_feedback_timeout_seconds", 45.0), 45.0)
@@ -729,18 +766,14 @@ def _run_tipico_vfd_valve(shared_state, now: float, features: Dict[str, Any]) ->
     heater_max_auto = clamp(_safe_float(settings.get("heater_max_pct", getattr(const, "heater_max_pct", HEATER_MAX)), HEATER_MAX), 0.0, HEATER_MAX)
     heater_pct = 0.0
     if features.get("usa_heater", False) and run_request:
-        heater_state = {"int": activation_ts.get("_heat_i", 0.0), "prev": activation_ts.get("_heat_prev", 0.0)}
         heater_error = sp_t - ret_t  # >0 necesita calentar
-        heater_pct = pid_step(heater_error, heater_state, PID_HEAT, 2.0, 0.0, heater_max_auto)
-        activation_ts["_heat_i"] = heater_state.get("int", 0.0)
-        activation_ts["_heat_prev"] = heater_state.get("prev", 0.0)
+        heater_pct = _pid_output(shared_state, "heat", PID_HEAT, sp_t, ret_t, heater_max_auto, "direct")
         if heater_error <= 0:
             heater_pct = 0.0
-            activation_ts["_heat_i"] = 0.0
+            _pid_pool(shared_state).pop("heat", None)
         heater_pct = clamp(heater_pct, 0.0, heater_max_auto)
     else:
-        activation_ts["_heat_i"] = 0.0
-        activation_ts["_heat_prev"] = 0.0
+        _pid_pool(shared_state).pop("heat", None)
         heater_pct = 0.0
 
     # OA damper
@@ -826,6 +859,9 @@ def _run_tipico_contactor_valve(shared_state, now: float, features: Dict[str, An
     alarms["interlock_humo"] = smoke
     alarms["interlock_termica"] = thermal
 
+    ret_t = _safe_float(sensors.get("temperatura_retorno", 0.0), 0.0)
+    sp_t = _safe_float(setpoints.get("temperature", 20.0), 20.0)
+
     run_request = on_global and pos_auto and not smoke and not thermal and not supply_high_temp_fault
     if features.get("usa_auto_manual", False) and pos_manual:
         alarms["interlock_manual"] = True
@@ -833,45 +869,8 @@ def _run_tipico_contactor_valve(shared_state, now: float, features: Dict[str, An
     else:
         alarms["interlock_manual"] = False
 
-    # Valve PID similar
-    ret_t = _safe_float(sensors.get("temperatura_retorno", 0.0), 0.0)
-    sp_t = _safe_float(setpoints.get("temperature", 20.0), 20.0)
-    valve_fb = _safe_float(sensors.get("retroalimentacion_valvula", 0.0), 0.0)
-    hold_s = max(5.0, _safe_float(settings.get("valve_min_output_hold_time_seconds", getattr(const, "valve_min_output_hold_time_seconds", 30.0)), 30.0))
-    kp = _safe_float(settings.get("valve_pid_kp", getattr(const, "valve_pid_kp", 1.2)), 1.2)
-    ki = _safe_float(settings.get("valve_pid_ki", getattr(const, "valve_pid_ki", 0.0)), 0.0)
-    kd = _safe_float(settings.get("valve_pid_kd", getattr(const, "valve_pid_kd", 0.0)), 0.0)
-    deadband = _safe_float(settings.get("valve_deadband_c", getattr(const, "valve_deadband_c", 0.2)), 0.2)
-
-    current_valve = _safe_float(actuators.get("control_valvula", 0.0))
-    err = ret_t - sp_t
-
-    prev_err = _safe_float(activation_ts.get("_valve_prev_err", 0.0), 0.0)
-    integ = _safe_float(activation_ts.get("_valve_i", 0.0), 0.0)
-    last_pid_ts = _safe_float(activation_ts.get("_valve_prev_ts", 0.0), 0.0)
-    dt = max(1e-3, now - last_pid_ts) if last_pid_ts else 1.0
-
-    if abs(err) <= deadband:
-        desired_valve = current_valve
-        integ = 0.0
-    else:
-        integ_candidate = integ + err * dt
-        deriv = (err - prev_err) / dt
-        raw = current_valve + (kp * err) + (ki * integ_candidate) + (kd * deriv)
-        desired_valve = clamp(raw, 0.0, 10.0)
-        if 0.0 < desired_valve < 10.0:
-            integ = integ_candidate
-
-    activation_ts["_valve_prev_err"] = err
-    activation_ts["_valve_i"] = integ
-    activation_ts["_valve_prev_ts"] = now
-
-    last_ts = activation_ts.get("_valve_hold_ts", 0.0)
-    if last_ts == 0.0 or (now - last_ts) >= hold_s:
-        valve_cmd = desired_valve
-        activation_ts["_valve_hold_ts"] = now
-    else:
-        valve_cmd = current_valve
+    # PID genérico de válvula.
+    valve_cmd = _valve_pid_command(shared_state, now, ret_t, sp_t)
 
     # Fan feedback confirmation
     fan_timeout = _safe_float(settings.get("fan_feedback_timeout_seconds", 45.0), 45.0)
@@ -890,18 +889,14 @@ def _run_tipico_contactor_valve(shared_state, now: float, features: Dict[str, An
     heater_max_auto = clamp(_safe_float(settings.get("heater_max_pct", getattr(const, "heater_max_pct", HEATER_MAX)), HEATER_MAX), 0.0, HEATER_MAX)
     heater_pct = 0.0
     if features.get("usa_heater", False) and run_request:
-        heater_state = {"int": activation_ts.get("_heat_i", 0.0), "prev": activation_ts.get("_heat_prev", 0.0)}
         heater_error = sp_t - ret_t
-        heater_pct = pid_step(heater_error, heater_state, PID_HEAT, 2.0, 0.0, heater_max_auto)
-        activation_ts["_heat_i"] = heater_state.get("int", 0.0)
-        activation_ts["_heat_prev"] = heater_state.get("prev", 0.0)
+        heater_pct = _pid_output(shared_state, "heat", PID_HEAT, sp_t, ret_t, heater_max_auto, "direct")
         if heater_error <= 0:
             heater_pct = 0.0
-            activation_ts["_heat_i"] = 0.0
+            _pid_pool(shared_state).pop("heat", None)
         heater_pct = clamp(heater_pct, 0.0, heater_max_auto)
     else:
-        activation_ts["_heat_i"] = 0.0
-        activation_ts["_heat_prev"] = 0.0
+        _pid_pool(shared_state).pop("heat", None)
         heater_pct = 0.0
 
     # OA damper
@@ -971,11 +966,6 @@ def control_loop(shared_state, stop_event, period_seconds: float = 2.0) -> None:
     # Forzar primer escritura: arrancamos sin últimos outputs conocidos
     last_outputs: Dict[str, Any] = {}
     last_stage = 0
-    pid_state = {
-        "temp": {"int": 0.0, "prev": 0.0},
-        "hum": {"int": 0.0, "prev": 0.0},
-        "heat": {"int": 0.0, "prev": 0.0},
-    }
     cycle_state: Dict[str, Dict[str, float]] = {}
     last_stage = last_stage
     startup_ts = None
@@ -1045,18 +1035,16 @@ def control_loop(shared_state, stop_event, period_seconds: float = 2.0) -> None:
                         humidity = float(sensors.get("humidity", 0.0))
                         hum_sp = float(setpoints.get("humidity", 60.0))
                         humidity_error = humidity - hum_sp
-                        hum_demand_pct = pid_step(
-                            humidity_error, pid_state["hum"], PID_HUM, period_seconds, 0.0, 100.0
-                        )
+                        hum_demand_pct = _pid_output(shared_state, "hum", PID_HUM, hum_sp, humidity, 100.0, "reverse")
                         if humidity_error <= 0:
-                            pid_state["hum"]["int"] = 0.0
+                            hum_demand_pct = 0.0
+                            _pid_pool(shared_state).pop("hum", None)
 
                     if CONTROL_MODE == "TEMP_HUM":
-                        temp_demand_pct = pid_step(
-                            temp_error_hot, pid_state["temp"], PID_TEMP, period_seconds, 0.0, 100.0
-                        )
+                        temp_demand_pct = _pid_output(shared_state, "temp", PID_TEMP, temp_sp, return_temp, 100.0, "reverse")
                         if temp_error_hot <= 0:
-                            pid_state["temp"]["int"] = 0.0
+                            temp_demand_pct = 0.0
+                            _pid_pool(shared_state).pop("temp", None)
                         cooling_demand_pct = max(temp_demand_pct, hum_demand_pct)
                         desired_stage = _stage_from_pid_demand(cooling_demand_pct, last_stage)
                     else:
@@ -1108,10 +1096,11 @@ def control_loop(shared_state, stop_event, period_seconds: float = 2.0) -> None:
                         heater_error = heater_error_base
                         if humidity_error > 0 and cooling_demand_pct > 0 and REHEAT_HUM_GAIN > 0:
                             heater_error += humidity_error * REHEAT_HUM_GAIN
-                        heater_pct = pid_step(heater_error, pid_state["heat"], PID_HEAT, period_seconds, 0.0, HEATER_MAX)
+                        heater_sp = temp_sp + (humidity_error * REHEAT_HUM_GAIN if humidity_error > 0 and cooling_demand_pct > 0 and REHEAT_HUM_GAIN > 0 else 0.0)
+                        heater_pct = _pid_output(shared_state, "heat", PID_HEAT, heater_sp, return_temp, HEATER_MAX, "direct")
                         if heater_error <= 0:
                             heater_pct = 0.0
-                            pid_state["heat"]["int"] = 0.0
+                            _pid_pool(shared_state).pop("heat", None)
                         heater_pct = clamp(heater_pct, 0.0, heater_max_auto)
 
                     info_extra = ""

@@ -1,9 +1,6 @@
-# import numpy as np
-# import matplotlib.pyplot as plt
-import time
 import logging
-from var import config
-from utilities.logging_utils import LineLimitedFileHandler, resolve_log_max_lines
+import os
+import time
 
 class PIDController:
     def __init__(
@@ -14,7 +11,7 @@ class PIDController:
         setpoint,
         sample_time=0.01,
         output_limits=(0, 100),
-        current_pump_percent=None,
+        initial_output=None,
         filter_alpha=0.2,
         deadband=0.15,
         output_step=0.5,
@@ -34,7 +31,7 @@ class PIDController:
         - setpoint: Valor deseado (referencia)
         - sample_time: Tiempo de muestreo en segundos
         - output_limits: Límites de salida del controlador (min, max)
-        - current_pump_percent: % actual para iniciar el PID (opcional)
+        - initial_output: salida inicial del PID (opcional)
         - filter_alpha: Alfa del filtro EMA para la PV (0-1)
         - deadband: Banda muerta alrededor del setpoint
         - output_step: Paso de cuantización de salida (%)
@@ -61,16 +58,16 @@ class PIDController:
         self.logger.propagate = False
         # Ensure only one file handler per PID log file
         pid_log_file = "logs/pid.log"
+        os.makedirs(os.path.dirname(pid_log_file), exist_ok=True)
         if not any(isinstance(h, logging.FileHandler) and h.baseFilename.endswith("pid.log") for h in self.logger.handlers):
-            max_lines = resolve_log_max_lines(pid_log_file, getattr(config, "LOG_MAX_LINES", None))
-            handler = LineLimitedFileHandler(pid_log_file, max_lines=max_lines)
+            handler = logging.FileHandler(pid_log_file)
             formatter = logging.Formatter(f'%(asctime)s %(levelname)s [{self.name}] %(message)s')
             handler.setFormatter(formatter)
             handler.setLevel(logging.INFO)
             self.logger.addHandler(handler)
         self.logger.setLevel(logging.INFO)
         
-        self.reset(current_pump_percent=current_pump_percent)
+        self.reset(initial_output=initial_output)
 
     @staticmethod
     def _normalize_direction(direction):
@@ -85,15 +82,15 @@ class PIDController:
     def set_direction(self, direction):
         self.direction = self._normalize_direction(direction)
     
-    def reset(self, current_pump_percent=None):
+    def reset(self, initial_output=None):
         """Reinicia el controlador (borra la memoria integral y derivativa)."""
         self.last_error = 0
         self.integral = 0
         self.last_time = time.time()
         # El valor filtrado se inicializa en la primera lectura válida.
         self.pv_filtered = None
-        if current_pump_percent is not None:
-            self.last_output = current_pump_percent
+        if initial_output is not None:
+            self.last_output = initial_output
     
     def update(self, measured_value):
         """
@@ -309,50 +306,3 @@ class PIDController:
         if output is None:
             output = 0.0
         return output
-
-
-def simulate_system(pid, initial_value=0, simulation_time=10, system_gain=1, system_time_constant=0.5):
-    """
-    Simula un sistema de primer orden controlado por el PID.
-    
-    Parámetros:
-    - pid: Instancia del controlador PID
-    - initial_value: Valor inicial del sistema
-    - simulation_time: Tiempo total de simulación en segundos
-    - system_gain: Ganancia del sistema
-    - system_time_constant: Constante de tiempo del sistema
-    
-    Retorna:
-    - time_points: Lista de puntos de tiempo
-    - system_values: Lista de valores del sistema
-    - control_signals: Lista de señales de control
-    """
-    # Variables de simulación
-    system_value = initial_value
-    time_points = []
-    system_values = []
-    control_signals = []
-    
-    start_time = time.time()
-    last_update_time = start_time
-    
-    while (time.time() - start_time) < simulation_time:
-        current_time = time.time()
-        
-        # Actualiza el controlador PID
-        control_signal = pid.update(system_value)
-        
-        if control_signal is not None:
-            # Simula la respuesta del sistema (primer orden)
-            # dy/dt = (K*u - y)/tau
-            delta_time = current_time - last_update_time
-            system_value += (system_gain * control_signal - system_value) / system_time_constant * delta_time
-            
-            # Guarda datos para graficar
-            time_points.append(current_time - start_time)
-            system_values.append(system_value)
-            control_signals.append(control_signal)
-            
-            last_update_time = current_time
-    
-    return time_points, system_values, control_signals
