@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Set
 
-from func.state import set_manual_on_off, set_schedule_mode, schedule_mode
+from func.state import SCHEDULE_MODE_AUTO, set_manual_on_off, set_schedule_mode, schedule_mode
 
 try:
     from var import const
@@ -366,6 +366,11 @@ def _apply(shared_state, payload: Dict[str, Any], *, on_off_override: bool = Fal
     keys = list(payload.keys())
     if "tipico" in payload:
         keys = ["tipico"] + [k for k in keys if k != "tipico"]
+    if "schedule_mode" in payload and "on_off_global" in payload:
+        priority = [k for k in ("tipico", "on_off_global", "schedule_mode") if k in payload]
+        keys = priority + [k for k in keys if k not in {"tipico", "on_off_global", "schedule_mode"}]
+
+    has_schedule_mode = "schedule_mode" in payload
 
     for key in keys:
         if key not in _ALLOWED_TOP:
@@ -376,7 +381,12 @@ def _apply(shared_state, payload: Dict[str, Any], *, on_off_override: bool = Fal
             except Exception:
                 pass
         elif key == "on_off_global":
-            set_manual_on_off(shared_state, payload["on_off_global"], override=True)
+            if has_schedule_mode:
+                shared_state["on_off_global"] = _as_bool(payload["on_off_global"], True)
+            elif on_off_override:
+                set_manual_on_off(shared_state, payload["on_off_global"], override=True)
+            else:
+                set_schedule_mode(shared_state, SCHEDULE_MODE_AUTO)
         elif key == "schedule_mode":
             set_schedule_mode(shared_state, payload["schedule_mode"])
         elif key == "mode":
