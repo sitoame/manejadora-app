@@ -20,7 +20,7 @@ La prioridad operativa queda centralizada en `func/state.py`:
 2. Si no hay override manual y `shared_state["calendar"]["enabled"]` es `false`, manda `shared_state["on_off_global"]`.
 3. Si no hay override manual y el calendario está habilitado, la habilitación efectiva es `shared_state["on_off_global"] && shared_state["calendar"]["q"]`.
 
-Los comandos MQTT `POWER`/`ON_OFF`/`ENCENDIDO` y los cambios de `on_off_global` por `runtime_config` activan `manual_override`.
+Los comandos MQTT `POWER`/`ON_OFF`/`ENCENDIDO` activan `manual_override`. En `runtime_config`, las cargas pasivas de snapshot conservan `on_off_global` como comando base sin activar override; para forzar ON/OFF desde el archivo se debe establecer `on_off_global_override: true` junto con `on_off_global`.
 
 ## Prioridad de reglas
 
