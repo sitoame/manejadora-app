@@ -4,6 +4,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Set
 
+from func.state import set_manual_on_off
+
 try:
     from var import const
 except Exception:  # pragma: no cover
@@ -28,7 +30,15 @@ if not _RC_PATH.is_absolute():
 RUNTIME_CONFIG_FILE = _RC_PATH
 POLL_SECONDS = float(getattr(const, "runtime_config_poll_seconds", 1.0))
 
-_ALLOWED_TOP = {"tipico", "on_off_global", "mode", "setpoints", "settings", "manual_overrides"}
+_ALLOWED_TOP = {
+    "tipico",
+    "on_off_global",
+    "on_off_global_override",
+    "mode",
+    "setpoints",
+    "settings",
+    "manual_overrides",
+}
 _ALLOWED_SETTINGS = {
     # Sensores y offsets
     "temp_supply_offset",
@@ -307,9 +317,11 @@ def _snapshot_editable(shared_state) -> Dict[str, Any]:
     settings = _feature_filtered_settings(shared_state.get("settings", {}), tipico_id)
     setpoints = _filter_setpoints(shared_state.get("setpoints", {}), tipico_id)
     manual = _filter_manual_overrides(shared_state.get("manual_overrides", {}), tipico_id)
+    calendar = shared_state.get("calendar") or {}
     return {
         "tipico": tipico_id,
         "on_off_global": bool(shared_state.get("on_off_global", True)),
+        "on_off_global_override": _as_bool(calendar.get("manual_override", False), False),
         "mode": str(shared_state.get("mode", "AUTO")),
         "setpoints": setpoints,
         "settings": settings,
@@ -336,7 +348,7 @@ def apply_runtime_config_once(shared_state) -> bool:
         if RUNTIME_CONFIG_FILE.exists():
             with RUNTIME_CONFIG_FILE.open("r", encoding="utf-8") as f:
                 payload = json.load(f)
-            _apply(shared_state, payload)
+            _apply(shared_state, payload, on_off_override=False)
             return True
 
         _atomic_write(RUNTIME_CONFIG_FILE, _snapshot_editable(shared_state))
@@ -346,7 +358,7 @@ def apply_runtime_config_once(shared_state) -> bool:
     return False
 
 
-def _apply(shared_state, payload: Dict[str, Any]) -> None:
+def _apply(shared_state, payload: Dict[str, Any], *, on_off_override: bool = False) -> None:
     if not isinstance(payload, dict):
         return
 
@@ -365,7 +377,10 @@ def _apply(shared_state, payload: Dict[str, Any]) -> None:
             except Exception:
                 pass
         elif key == "on_off_global":
-            shared_state["on_off_global"] = _as_bool(payload["on_off_global"], True)
+            override = _as_bool(payload.get("on_off_global_override"), on_off_override)
+            set_manual_on_off(shared_state, payload["on_off_global"], override=override)
+        elif key == "on_off_global_override":
+            continue
         elif key == "mode":
             shared_state["mode"] = str(payload["mode"]).upper()
         elif key == "setpoints":
@@ -430,7 +445,7 @@ def runtime_config_loop(shared_state, stop_event):
                 if last_mtime is None or mt > last_mtime:
                     with RUNTIME_CONFIG_FILE.open("r", encoding="utf-8") as f:
                         payload = json.load(f)
-                    _apply(shared_state, payload)
+                    _apply(shared_state, payload, on_off_override=last_mtime is not None)
                     last_mtime = mt
 
             # 2) reflejar estado actual editable en archivo en tiempo real

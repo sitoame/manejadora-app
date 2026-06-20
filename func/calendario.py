@@ -7,7 +7,7 @@ Configuracion:
 Referencia IEC 61131-3:
     El modulo usa una estructura de Function Block con variables EN, Q, PT y
     ET, y temporizadores tipo TON/TOF para retardos de encendido/apagado.
-    El resultado se publica en shared_state["on_off_global"].
+    El resultado se publica en shared_state["calendar"].
 """
 
 import json
@@ -33,8 +33,8 @@ except Exception:  # pragma: no cover
 # CONFIGURACION DEL CALENDARIO
 # ---------------------------------------------------------------------------
 
-# Habilita el control por calendario. Si es False, este modulo no cambia el
-# estado global y solo reporta estado en shared_state["calendar"].
+# Habilita la participacion del calendario en la habilitacion efectiva.
+# El modulo solo reporta estado en shared_state["calendar"].
 CALENDARIO_HABILITADO = True
 
 # Zona horaria local del controlador.
@@ -626,12 +626,10 @@ def evaluar_solicitud(now: Optional[datetime] = None) -> Tuple[bool, str, str]:
 
 
 def _publish_result(shared_state, result: ResultadoCalendario) -> None:
-    if result.enabled:
-        shared_state["on_off_global"] = bool(result.q)
-
     calendar_state = shared_state.get("calendar")
     if calendar_state is None:
-        return
+        calendar_state = {}
+        shared_state["calendar"] = calendar_state
 
     calendar_state["enabled"] = bool(result.enabled)
     calendar_state["request"] = bool(result.request)

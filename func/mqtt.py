@@ -7,6 +7,8 @@ from pathlib import Path
 
 import paho.mqtt.client as mqtt
 
+from func.state import effective_on_off_global, set_manual_on_off
+
 try:
     from var import const
 except Exception:  # pragma: no cover - defensivo
@@ -240,8 +242,7 @@ def apply_command(shared_state, payload: Dict[str, Any]) -> None:
         except Exception:
             pass
     elif cmd in ("POWER", "ON_OFF", "ENCENDIDO"):
-        state_val = bool(value)
-        shared_state["on_off_global"] = state_val
+        state_val = set_manual_on_off(shared_state, value, override=True)
         _log(f"POWER -> {state_val}")
     elif cmd in ("SET_TIPICO", "TIPICO"):
         try:
@@ -439,6 +440,7 @@ def publish_status(client: mqtt.Client, shared_state) -> None:
         payload = {
             "controller": CLIENT_ID,
             "on_off_global": bool(shared_state.get("on_off_global", True)),
+            "on_off_effective": effective_on_off_global(shared_state),
             "mode": shared_state.get("mode", "AUTO"),
             "setpoints": dict(shared_state.get("setpoints", {})),
             "outputs": dict(shared_state.get("actuators", {})),

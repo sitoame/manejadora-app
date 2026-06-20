@@ -229,6 +229,7 @@ def create_shared_state(manager: multiprocessing.Manager):
                     "enabled": False,
                     "request": False,
                     "q": True,
+                    "manual_override": False,
                     "source": "INIT",
                     "detail": "calendario no evaluado",
                     "now_local": "",
