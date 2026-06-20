@@ -6,6 +6,7 @@ from influxdb_client import InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
 
 from utilities import write_data, json_formatter
+from func.state import effective_on_off_global
 
 try:
     from var import const
@@ -182,7 +183,7 @@ def build_payload(shared_state) -> Dict[str, Any]:
     alarms = shared_state.get("alarms") or {}
     overrides = shared_state.get("manual_overrides") or {}
     resets = shared_state.get("resets") or {}
-    enabled = bool(shared_state.get("on_off_global", True))
+    enabled = effective_on_off_global(shared_state)
     tipico_id = int(shared_state.get("tipico", 1))
     allowed = _allowed_for_tipico(tipico_id)
     allowed_sensors = set(allowed.get("allowed_sensors", set()))

@@ -12,6 +12,7 @@ from urllib.parse import urlparse, parse_qs
 import os
 
 from func import calendario, runtime_config
+from func.state import effective_on_off_global
 try:
     from var import const
 except Exception:  # pragma: no cover
@@ -123,7 +124,8 @@ def _horario_snapshot(load_file: bool = False) -> dict:
 
 
 def snapshot_state(shared_state) -> dict:
-    enabled = bool(shared_state.get("on_off_global", True))
+    manual_enabled = bool(shared_state.get("on_off_global", True))
+    enabled = effective_on_off_global(shared_state)
     tipico_id = int(shared_state.get("tipico", getattr(tipicos, "DEFAULT_TIPICO", 1)))
     sensors = dict(shared_state.get("sensors", {}))
     outputs = dict(shared_state.get("actuators", {}))
@@ -136,7 +138,8 @@ def snapshot_state(shared_state) -> dict:
     setpoints_filtered = runtime_config._filter_setpoints(shared_state.get("setpoints", {}), tipico_id)
 
     return {
-        "on_off_global": enabled,
+        "on_off_global": manual_enabled,
+        "on_off_effective": enabled,
         "mode": shared_state.get("mode", "AUTO"),
         "tipico": tipico_id,
         "setpoints": _sanitize_json(setpoints_filtered),
@@ -310,7 +313,8 @@ def _build_monitor_html() -> str:
         <div class="meta-bar">
           <span class="meta-pill">Típico: <b>${data.tipico}</b></span>
           <span class="meta-pill">Modo: <b>${data.mode}</b></span>
-          <span class="meta-pill ${data.on_off_global ? 'ok' : 'bad'}">Global: <b>${data.on_off_global ? 'ON' : 'OFF'}</b></span>
+          <span class="meta-pill ${data.on_off_effective ? 'ok' : 'bad'}">Efectivo: <b>${data.on_off_effective ? 'ON' : 'OFF'}</b></span>
+          <span class="meta-pill ${data.on_off_global ? 'ok' : 'bad'}">Manual: <b>${data.on_off_global ? 'ON' : 'OFF'}</b></span>
           <span class="meta-pill">Actualizado: ${ts}</span>
         </div>
         <div class="meta-req">Requeridos → sensores: <code>${reqSensors.join(', ') || '-'}</code> | actuadores: <code>${reqActuators.join(', ') || '-'}</code></div>

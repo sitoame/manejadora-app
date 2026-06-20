@@ -5,6 +5,7 @@ from typing import Dict, Any, Tuple
 from var import const
 from var import tipicos
 from func.runtime_config import allowed_keys_for_tipico
+from func.state import effective_on_off_global
 
 # PID y umbrales (configurables en const.py)
 TEMP_STAGE1_DELTA = getattr(const, "temp_stage1_delta", 0.2)
@@ -458,7 +459,7 @@ def _run_tipico_1_2(shared_state, now: float) -> None:
             f"actuadores={sorted(validation['missing_actuators'])}"
         )
 
-    on_global = bool(shared_state.get("on_off_global", True))
+    on_global = effective_on_off_global(shared_state)
     smoke = bool(sensors.get("detector_humo", 0))
     thermal = bool(sensors.get("alarma_termica", 0))
     vfd_alarm = bool(sensors.get("alarma_vfd", 0))
@@ -635,7 +636,7 @@ def _run_tipico_vfd_valve(shared_state, now: float, features: Dict[str, Any]) ->
     setpoints = shared_state.get("setpoints") or {}
 
     tipico_id = int(shared_state.get("tipico", tipicos.DEFAULT_TIPICO))
-    on_global = bool(shared_state.get("on_off_global", True))
+    on_global = effective_on_off_global(shared_state)
     smoke = bool(sensors.get("detector_humo", 0))
     vfd_alarm = bool(sensors.get("alarma_vfd", 0))
     supply_high_temp_fault = _supply_high_temp_fault(sensors, alarms, activation_ts, settings, now)
@@ -814,7 +815,7 @@ def _run_tipico_contactor_valve(shared_state, now: float, features: Dict[str, An
     settings = shared_state.get("settings") or {}
     setpoints = shared_state.get("setpoints") or {}
 
-    on_global = bool(shared_state.get("on_off_global", True))
+    on_global = effective_on_off_global(shared_state)
     pos_manual = bool(sensors.get("posicion_manual", 0))
     pos_auto = bool(sensors.get("posicion_automatico", 1))
     smoke = bool(sensors.get("detector_humo", 0))
@@ -1010,7 +1011,7 @@ def control_loop(shared_state, stop_event, period_seconds: float = 2.0) -> None:
                 time.sleep(period_seconds)
                 continue
 
-            enabled = bool(shared_state.get("on_off_global", True))
+            enabled = effective_on_off_global(shared_state)
             supply_high_temp_fault = _supply_high_temp_fault(sensors, alarms, activation_ts, settings, now)
             if not enabled:
                 outputs = {"fan": False, "heater": 0.0}

@@ -4,6 +4,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Set
 
+from func.state import set_manual_on_off
+
 try:
     from var import const
 except Exception:  # pragma: no cover
@@ -365,7 +367,7 @@ def _apply(shared_state, payload: Dict[str, Any]) -> None:
             except Exception:
                 pass
         elif key == "on_off_global":
-            shared_state["on_off_global"] = _as_bool(payload["on_off_global"], True)
+            set_manual_on_off(shared_state, payload["on_off_global"], override=True)
         elif key == "mode":
             shared_state["mode"] = str(payload["mode"]).upper()
         elif key == "setpoints":

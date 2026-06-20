@@ -1,6 +1,6 @@
 # Calendario operativo (`func/calendario.py`)
 
-El módulo `func/calendario.py` controla la habilitación global de la manejadora por horario. Evalúa reglas semanales, excepciones por fecha y eventos prioritarios; luego publica el resultado en `shared_state["on_off_global"]` para que el lazo de control use el estado operativo vigente.
+El módulo `func/calendario.py` calcula la solicitud horaria de la manejadora. Evalúa reglas semanales, excepciones por fecha y eventos prioritarios; luego publica solo el resultado en `shared_state["calendar"]`. `shared_state["on_off_global"]` queda reservado como comando global/manual de operador o configuración runtime.
 
 ## Flujo de ejecución
 
@@ -8,7 +8,19 @@ El módulo `func/calendario.py` controla la habilitación global de la manejador
 2. Antes de iniciar los procesos, `main.py` ejecuta una evaluación inicial con `apply_calendar_once()`.
 3. El proceso `calendario_loop()` queda corriendo en paralelo y reevalúa el horario cada `ciclo_segundos`.
 4. Si existe `var/horario.json`, el proceso lo recarga cuando cambia su `mtime`.
-5. Cuando el calendario está habilitado, el resultado `Q` se aplica sobre `shared_state["on_off_global"]`.
+5. El calendario publica `enabled`, `request`, `q`, `source`, `detail` y metadatos en `shared_state["calendar"]`; no escribe `shared_state["on_off_global"]`.
+6. El control calcula la habilitación efectiva combinando comando manual y calendario.
+
+
+## Habilitación efectiva
+
+La prioridad operativa queda centralizada en `func/state.py`:
+
+1. Si `shared_state["calendar"]["manual_override"]` es `true`, manda `shared_state["on_off_global"]`. Este modo permite que un comando manual o runtime fuerce ON/OFF aunque el calendario indique lo contrario.
+2. Si no hay override manual y `shared_state["calendar"]["enabled"]` es `false`, manda `shared_state["on_off_global"]`.
+3. Si no hay override manual y el calendario está habilitado, la habilitación efectiva es `shared_state["on_off_global"] && shared_state["calendar"]["q"]`.
+
+Los comandos MQTT `POWER`/`ON_OFF`/`ENCENDIDO` y los cambios de `on_off_global` por `runtime_config` activan `manual_override`.
 
 ## Prioridad de reglas
 
@@ -113,7 +125,7 @@ curl -u dynatek:dynatek \
 
 | Campo | Tipo | Descripción |
 | --- | --- | --- |
-| `calendario_habilitado` | boolean | Si es `false`, el calendario no escribe `on_off_global`. |
+| `calendario_habilitado` | boolean | Si es `false`, el calendario publica `enabled=false` y no limita la habilitación efectiva. |
 | `zona_horaria` | string | Zona IANA, por ejemplo `America/Panama`. |
 | `ciclo_segundos` | número | Periodo de evaluación. Mínimo efectivo: `0.25`. |
 | `retardo_encendido_seg` | número | TON antes de encender. No acepta negativos. |
@@ -182,6 +194,7 @@ Los eventos tienen prioridad máxima y aceptan fecha/hora en formato `YYYY-MM-DD
     "enabled": true,
     "request": true,
     "q": true,
+    "manual_override": false,
     "source": "SEMANAL",
     "detail": "LUN 06:00-18:00",
     "now_local": "2026-06-11T09:00:00-05:00",
