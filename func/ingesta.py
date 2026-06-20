@@ -183,6 +183,7 @@ def build_payload(shared_state) -> Dict[str, Any]:
     alarms = shared_state.get("alarms") or {}
     overrides = shared_state.get("manual_overrides") or {}
     resets = shared_state.get("resets") or {}
+    manual_enabled = bool(shared_state.get("on_off_global", True))
     enabled = effective_on_off_global(shared_state)
     tipico_id = int(shared_state.get("tipico", 1))
     allowed = _allowed_for_tipico(tipico_id)
@@ -193,7 +194,8 @@ def build_payload(shared_state) -> Dict[str, Any]:
 
     fields = {
         "tipico": tipico_id,
-        "on_off_global": _as_int(enabled),
+        "on_off_global": _as_int(manual_enabled),
+        "on_off_effective": _as_int(enabled),
         "mode_manual": 1 if str(shared_state.get("mode", "AUTO")).upper() == "MANUAL" else 0,
         "reset_all": _as_int(resets.get("all", 0)),
     }

@@ -13,6 +13,7 @@ Referencia IEC 61131-3:
 import json
 import signal
 import time
+from func.state import sync_on_off_effective
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -642,6 +643,7 @@ def _publish_result(shared_state, result: ResultadoCalendario) -> None:
     calendar_state["on_delay_seconds"] = float(RETARDO_ENCENDIDO_SEG)
     calendar_state["off_delay_seconds"] = float(RETARDO_APAGADO_SEG)
     calendar_state["ts"] = time.time()
+    sync_on_off_effective(shared_state)
 
 
 def apply_calendar_once(shared_state) -> ResultadoCalendario:
