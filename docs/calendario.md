@@ -14,13 +14,13 @@ El módulo `func/calendario.py` calcula la solicitud horaria de la manejadora. E
 
 ## Habilitación efectiva
 
-La prioridad operativa queda centralizada en `func/state.py`:
+La prioridad operativa queda centralizada en `func/state.py` mediante `schedule_mode`:
 
-1. Si `shared_state["calendar"]["manual_override"]` es `true`, manda `shared_state["on_off_global"]`. Este modo permite que un comando manual o runtime fuerce ON/OFF aunque el calendario indique lo contrario.
-2. Si no hay override manual y `shared_state["calendar"]["enabled"]` es `false`, manda `shared_state["on_off_global"]`.
-3. Si no hay override manual y el calendario está habilitado, la habilitación efectiva es `shared_state["on_off_global"] && shared_state["calendar"]["q"]`.
+1. `MANUAL_ON`: el operador fuerza la salida efectiva en ON.
+2. `MANUAL_OFF`: el operador fuerza la salida efectiva en OFF.
+3. `AUTO`: el calendario decide la salida efectiva; si el calendario está deshabilitado, la solicitud calendario se considera ON por seguridad operacional.
 
-Los comandos MQTT `POWER`/`ON_OFF`/`ENCENDIDO` activan `manual_override`. En `runtime_config`, las cargas pasivas de snapshot conservan `on_off_global` como comando base sin activar override; para forzar ON/OFF desde el archivo se debe establecer `on_off_global_override: true` junto con `on_off_global`.
+Los comandos MQTT `POWER`/`ON_OFF`/`ENCENDIDO` escriben `MANUAL_ON` o `MANUAL_OFF`. El comando `SCHEDULE_MODE`/`POWER_POLICY` permite volver a `AUTO` o fijar un modo explícito. `runtime_config.json` persiste/restaura `schedule_mode`.
 
 ## Prioridad de reglas
 
@@ -190,11 +190,14 @@ Los eventos tienen prioridad máxima y aceptan fecha/hora en formato `YYYY-MM-DD
 
 ```json
 {
+  "schedule_mode": "AUTO",
+  "manual_request": null,
+  "calendar_request": true,
+  "effective_on_off": true,
   "calendar": {
     "enabled": true,
     "request": true,
     "q": true,
-    "manual_override": false,
     "source": "SEMANAL",
     "detail": "LUN 06:00-18:00",
     "now_local": "2026-06-11T09:00:00-05:00",

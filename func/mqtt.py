@@ -7,7 +7,7 @@ from pathlib import Path
 
 import paho.mqtt.client as mqtt
 
-from func.state import effective_on_off_global, set_manual_on_off
+from func.state import power_policy_snapshot, set_manual_on_off, set_schedule_mode
 
 try:
     from var import const
@@ -208,8 +208,8 @@ def apply_command(shared_state, payload: Dict[str, Any]) -> None:
     Comandos soportados:
       - SET_TEMP / SETPOINT_TEMP / SETPOINT_TEMPERATURA -> value (float)
       - SET_HUM / SETPOINT_HUM / SETPOINT_HUMEDAD -> value (float)
-      - POWER / ON_OFF -> value (bool/int)
-      - MODE / MODO -> AUTO o MANUAL
+      - POWER / ON_OFF -> value (bool/int), fija MANUAL_ON o MANUAL_OFF
+      - MODE / MODO -> AUTO o MANUAL para overrides de salidas; POWER_POLICY/SCHEDULE_MODE -> AUTO, MANUAL_ON o MANUAL_OFF
       - MANUAL / MODO_MANUAL -> overrides de salidas forzables (fan, heater, contactor, VFD DO/AO, válvula, dámper, UV) y marca *_forced
       - FORCE_FAN_ON / FORCE_FAN_OFF / AUTO_FAN -> forzar/auto ventilador o VFD DO si el típico usa VFD
       - FORCE_FAN_VEL / AUTO_FAN_VEL -> forzar/auto velocidad VFD en 0-100 %
@@ -243,7 +243,10 @@ def apply_command(shared_state, payload: Dict[str, Any]) -> None:
             pass
     elif cmd in ("POWER", "ON_OFF", "ENCENDIDO"):
         state_val = set_manual_on_off(shared_state, value, override=True)
-        _log(f"POWER -> {state_val}")
+        _log(f"POWER -> {state_val} schedule_mode={shared_state.get('schedule_mode')}")
+    elif cmd in ("POWER_POLICY", "SCHEDULE_MODE", "MODO_CALENDARIO"):
+        mode_value = set_schedule_mode(shared_state, value)
+        _log(f"SCHEDULE_MODE -> {mode_value}")
     elif cmd in ("SET_TIPICO", "TIPICO"):
         try:
             shared_state["tipico"] = int(value)
@@ -437,10 +440,15 @@ def apply_command(shared_state, payload: Dict[str, Any]) -> None:
 
 def publish_status(client: mqtt.Client, shared_state) -> None:
     try:
+        policy = power_policy_snapshot(shared_state)
         payload = {
             "controller": CLIENT_ID,
             "on_off_global": bool(shared_state.get("on_off_global", True)),
-            "on_off_effective": effective_on_off_global(shared_state),
+            "schedule_mode": policy["schedule_mode"],
+            "manual_request": policy["manual_request"],
+            "calendar_request": policy["calendar_request"],
+            "effective_on_off": policy["effective_on_off"],
+            "on_off_effective": policy["effective_on_off"],
             "mode": shared_state.get("mode", "AUTO"),
             "setpoints": dict(shared_state.get("setpoints", {})),
             "outputs": dict(shared_state.get("actuators", {})),

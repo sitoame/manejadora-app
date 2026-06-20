@@ -38,6 +38,7 @@ def create_shared_state(manager: multiprocessing.Manager):
     return manager.dict(
         {
             "on_off_global": True,
+            "schedule_mode": "AUTO",
             "mode": "AUTO",
             "tipico": tipico_default,
             "last_modbus_ok": False,
@@ -229,7 +230,6 @@ def create_shared_state(manager: multiprocessing.Manager):
                     "enabled": False,
                     "request": False,
                     "q": True,
-                    "manual_override": False,
                     "source": "INIT",
                     "detail": "calendario no evaluado",
                     "now_local": "",

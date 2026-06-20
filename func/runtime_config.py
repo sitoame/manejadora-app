@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Set
 
-from func.state import set_manual_on_off
+from func.state import SCHEDULE_MODE_AUTO, set_manual_on_off, set_schedule_mode, schedule_mode
 
 try:
     from var import const
@@ -33,7 +33,7 @@ POLL_SECONDS = float(getattr(const, "runtime_config_poll_seconds", 1.0))
 _ALLOWED_TOP = {
     "tipico",
     "on_off_global",
-    "on_off_global_override",
+    "schedule_mode",
     "mode",
     "setpoints",
     "settings",
@@ -317,11 +317,10 @@ def _snapshot_editable(shared_state) -> Dict[str, Any]:
     settings = _feature_filtered_settings(shared_state.get("settings", {}), tipico_id)
     setpoints = _filter_setpoints(shared_state.get("setpoints", {}), tipico_id)
     manual = _filter_manual_overrides(shared_state.get("manual_overrides", {}), tipico_id)
-    calendar = shared_state.get("calendar") or {}
     return {
         "tipico": tipico_id,
         "on_off_global": bool(shared_state.get("on_off_global", True)),
-        "on_off_global_override": _as_bool(calendar.get("manual_override", False), False),
+        "schedule_mode": schedule_mode(shared_state),
         "mode": str(shared_state.get("mode", "AUTO")),
         "setpoints": setpoints,
         "settings": settings,
@@ -367,6 +366,11 @@ def _apply(shared_state, payload: Dict[str, Any], *, on_off_override: bool = Fal
     keys = list(payload.keys())
     if "tipico" in payload:
         keys = ["tipico"] + [k for k in keys if k != "tipico"]
+    if "schedule_mode" in payload and "on_off_global" in payload:
+        priority = [k for k in ("tipico", "on_off_global", "schedule_mode") if k in payload]
+        keys = priority + [k for k in keys if k not in {"tipico", "on_off_global", "schedule_mode"}]
+
+    has_schedule_mode = "schedule_mode" in payload
 
     for key in keys:
         if key not in _ALLOWED_TOP:
@@ -377,10 +381,14 @@ def _apply(shared_state, payload: Dict[str, Any], *, on_off_override: bool = Fal
             except Exception:
                 pass
         elif key == "on_off_global":
-            override = _as_bool(payload.get("on_off_global_override"), on_off_override)
-            set_manual_on_off(shared_state, payload["on_off_global"], override=override)
-        elif key == "on_off_global_override":
-            continue
+            if has_schedule_mode:
+                shared_state["on_off_global"] = _as_bool(payload["on_off_global"], True)
+            elif on_off_override:
+                set_manual_on_off(shared_state, payload["on_off_global"], override=True)
+            else:
+                set_schedule_mode(shared_state, SCHEDULE_MODE_AUTO)
+        elif key == "schedule_mode":
+            set_schedule_mode(shared_state, payload["schedule_mode"])
         elif key == "mode":
             shared_state["mode"] = str(payload["mode"]).upper()
         elif key == "setpoints":
