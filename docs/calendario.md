@@ -9,18 +9,18 @@ El módulo `func/calendario.py` calcula la solicitud horaria de la manejadora. E
 3. El proceso `calendario_loop()` queda corriendo en paralelo y reevalúa el horario cada `ciclo_segundos`.
 4. Si existe `var/horario.json`, el proceso lo recarga cuando cambia su `mtime`.
 5. El calendario publica `enabled`, `request`, `q`, `source`, `detail` y metadatos en `shared_state["calendar"]`; no escribe `shared_state["on_off_global"]`.
-6. El control calcula la habilitación efectiva combinando comando manual y calendario.
+6. `func/state.py` recalcula y publica `shared_state["on_off_effective"]`; el control solo lee esa salida efectiva.
 
 
 ## Habilitación efectiva
 
-La prioridad operativa queda centralizada en `func/state.py` mediante `schedule_mode`:
+La política operativa queda centralizada en `func/state.py`:
 
-1. `MANUAL_ON`: el operador fuerza la salida efectiva en ON.
-2. `MANUAL_OFF`: el operador fuerza la salida efectiva en OFF.
-3. `AUTO`: el calendario decide la salida efectiva; si el calendario está deshabilitado, la solicitud calendario se considera ON por seguridad operacional.
+1. `shared_state["on_off_global"]` conserva la solicitud global/manual del operador o de `runtime_config.json`.
+2. `shared_state["calendar"]` conserva solo la señal propia del calendario (`q`/`request`) y nunca reemplaza `on_off_global`.
+3. `shared_state["on_off_effective"]` se calcula como `on_off_global AND calendar_request`; si el calendario está deshabilitado, `calendar_request` se considera `ON` por seguridad operacional.
 
-Los comandos MQTT `POWER`/`ON_OFF`/`ENCENDIDO` escriben `MANUAL_ON` o `MANUAL_OFF`. El comando `SCHEDULE_MODE`/`POWER_POLICY` permite volver a `AUTO` o fijar un modo explícito. `runtime_config.json` persiste/restaura `schedule_mode`.
+Los comandos MQTT `POWER`/`ON_OFF`/`ENCENDIDO` actualizan la solicitud global y publican el resultado efectivo. El comando `SCHEDULE_MODE`/`POWER_POLICY` mantiene la interfaz pública para volver a `AUTO` o fijar un modo explícito. `runtime_config.json` persiste/restaura `on_off_global` y `schedule_mode`.
 
 ## Prioridad de reglas
 
@@ -186,12 +186,12 @@ Los eventos tienen prioridad máxima y aceptan fecha/hora en formato `YYYY-MM-DD
 
 ## Estado en `/api/status`
 
-`/api/status` incluye el bloque `calendar` con el último resultado:
+`/api/status` expone la solicitud global, la señal calendario y la salida efectiva junto al bloque `calendar`:
 
 ```json
 {
   "schedule_mode": "AUTO",
-  "manual_request": null,
+  "manual_request": true,
   "calendar_request": true,
   "effective_on_off": true,
   "calendar": {

@@ -45,7 +45,7 @@ Reglas generales:
 - Un payload que no sea JSON válido o que no sea objeto se rechaza.
 - Un comando no reconocido se registra como no aceptado y no modifica el estado.
 - Los comandos de forzado escriben en `manual_overrides` y activan el flag `*_forced` del punto correspondiente.
-- `POWER`/`ON_OFF` fijan `schedule_mode` en `MANUAL_ON` o `MANUAL_OFF`; `SCHEDULE_MODE`/`POWER_POLICY` acepta `AUTO`, `MANUAL_ON` o `MANUAL_OFF`.
+- `POWER`/`ON_OFF` actualizan `on_off_global` como solicitud global/manual y recalculan `on_off_effective`; `SCHEDULE_MODE`/`POWER_POLICY` acepta `AUTO`, `MANUAL_ON` o `MANUAL_OFF`.
 
 ## Publicación de estado
 
@@ -56,7 +56,7 @@ El cliente publica periódicamente en el tópico de estado un JSON con esta estr
   "controller": "eg628_AM",
   "on_off_global": true,
   "schedule_mode": "AUTO",
-  "manual_request": null,
+  "manual_request": true,
   "calendar_request": true,
   "effective_on_off": true,
   "on_off_effective": true,
@@ -72,7 +72,10 @@ Campos publicados:
 | Campo | Descripción |
 | --- | --- |
 | `controller` | Identificador local del controlador. |
-| `on_off_global` | Estado global de encendido. |
+| `on_off_global` | Solicitud global/manual del operador. |
+| `manual_request` | Misma solicitud global/manual normalizada para telemetría. |
+| `calendar_request` | Señal propia del calendario; no reemplaza la solicitud global. |
+| `effective_on_off` / `on_off_effective` | Estado aplicado calculado por `func/state.py` como solicitud global y calendario. |
 | `mode` | Modo operativo actual (`AUTO`, `MANUAL` u otro valor recibido por `MODE`). |
 | `setpoints` | Setpoints activos. |
 | `outputs` | Salidas/actuadores actuales. |
@@ -101,7 +104,7 @@ Ejemplos:
 
 | Comando(s) | `value` esperado | Efecto |
 | --- | --- | --- |
-| `POWER`, `ON_OFF`, `ENCENDIDO` | Booleano o valor convertible a `bool` | Actualiza `on_off_global`. |
+| `POWER`, `ON_OFF`, `ENCENDIDO` | Booleano o valor convertible a `bool` | Actualiza `on_off_global` y recalcula `on_off_effective`. |
 | `SET_TIPICO`, `TIPICO` | Entero | Convierte `value` a `int` y actualiza `tipico`. Si no se puede convertir, no cambia el típico y registra el error. |
 | `SET_VFD_SPEED`, `VFD_SPEED` | Número 0-100 | Convierte `value` a `float`, limita el valor a `0.0..100.0` y actualiza `settings.vfd_speed_command_pct`. |
 | `MODE`, `MODO` | String | Actualiza `mode` con `value.upper()`. Si el valor es `AUTO`, limpia todos los flags `*_forced`; si es otro valor, solo cambia el modo. |

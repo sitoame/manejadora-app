@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from func import calendario, control, ingesta, modbus, mqtt, reset_auto, runtime_config
+from func.state import sync_on_off_effective
 from var import const
 from var import tipicos
 
@@ -38,6 +39,7 @@ def create_shared_state(manager: multiprocessing.Manager):
     return manager.dict(
         {
             "on_off_global": True,
+            "on_off_effective": True,
             "schedule_mode": "AUTO",
             "mode": "AUTO",
             "tipico": tipico_default,
@@ -284,6 +286,7 @@ def main():
 
     try:
         calendario.apply_calendar_once(shared_state)
+        sync_on_off_effective(shared_state)
         print("[main] Calendario operativo aplicado antes de iniciar procesos.")
     except Exception as exc:
         print(f"[main] No se pudo precargar calendario operativo: {exc}")

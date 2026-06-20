@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Set
 
-from func.state import SCHEDULE_MODE_AUTO, set_manual_on_off, set_schedule_mode, schedule_mode
+from func.state import SCHEDULE_MODE_AUTO, set_manual_on_off, set_schedule_mode, schedule_mode, sync_on_off_effective
 
 try:
     from var import const
@@ -383,6 +383,7 @@ def _apply(shared_state, payload: Dict[str, Any], *, on_off_override: bool = Fal
         elif key == "on_off_global":
             if has_schedule_mode:
                 shared_state["on_off_global"] = _as_bool(payload["on_off_global"], True)
+                sync_on_off_effective(shared_state)
             elif on_off_override:
                 set_manual_on_off(shared_state, payload["on_off_global"], override=True)
             else:

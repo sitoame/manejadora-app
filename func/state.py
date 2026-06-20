@@ -44,6 +44,10 @@ def schedule_mode(shared_state) -> str:
     return normalize_schedule_mode(shared_state.get("schedule_mode", SCHEDULE_MODE_AUTO))
 
 
+def manual_on_off_request(shared_state) -> bool:
+    return _as_bool(shared_state.get("on_off_global", True), True)
+
+
 def calendar_request(shared_state) -> bool:
     calendar = calendar_state(shared_state)
     if not _as_bool(calendar.get("enabled", False), False):
@@ -51,16 +55,33 @@ def calendar_request(shared_state) -> bool:
     return _as_bool(calendar.get("q", True), True)
 
 
+def calculate_on_off_effective(shared_state) -> bool:
+    return manual_on_off_request(shared_state) and calendar_request(shared_state)
+
+
+def sync_on_off_effective(shared_state) -> bool:
+    effective = calculate_on_off_effective(shared_state)
+    shared_state["on_off_effective"] = effective
+    return effective
+
+
 def set_schedule_mode(shared_state, mode: Any) -> str:
     normalized = normalize_schedule_mode(mode)
     shared_state["schedule_mode"] = normalized
-    shared_state["on_off_global"] = normalized != SCHEDULE_MODE_MANUAL_OFF
+    if normalized == SCHEDULE_MODE_MANUAL_ON:
+        shared_state["on_off_global"] = True
+    elif normalized == SCHEDULE_MODE_MANUAL_OFF:
+        shared_state["on_off_global"] = False
+    sync_on_off_effective(shared_state)
     return normalized
 
 
 def set_manual_on_off(shared_state, value: Any, *, override: bool = True) -> bool:
     command = _as_bool(value, True)
-    set_schedule_mode(shared_state, SCHEDULE_MODE_MANUAL_ON if command else SCHEDULE_MODE_MANUAL_OFF)
+    shared_state["on_off_global"] = command
+    if override:
+        shared_state["schedule_mode"] = SCHEDULE_MODE_MANUAL_ON if command else SCHEDULE_MODE_MANUAL_OFF
+    sync_on_off_effective(shared_state)
     return command
 
 
@@ -69,26 +90,20 @@ def set_auto_schedule(shared_state) -> str:
 
 
 def effective_on_off_global(shared_state) -> bool:
-    """Calcula habilitación efectiva: modo manual explícito > calendario."""
-    mode = schedule_mode(shared_state)
-    if mode == SCHEDULE_MODE_MANUAL_ON:
-        return True
-    if mode == SCHEDULE_MODE_MANUAL_OFF:
-        return False
-    return calendar_request(shared_state)
+    """Lee la habilitación efectiva publicada por este módulo."""
+    stored = shared_state.get("on_off_effective", None)
+    if stored is None:
+        return sync_on_off_effective(shared_state)
+    return _as_bool(stored, True)
 
 
 def power_policy_snapshot(shared_state) -> Dict[str, Any]:
     mode = schedule_mode(shared_state)
-    cal_request = calendar_request(shared_state)
-    manual_request = None
-    if mode == SCHEDULE_MODE_MANUAL_ON:
-        manual_request = True
-    elif mode == SCHEDULE_MODE_MANUAL_OFF:
-        manual_request = False
+    effective = sync_on_off_effective(shared_state)
     return {
         "schedule_mode": mode,
-        "manual_request": manual_request,
-        "calendar_request": cal_request,
-        "effective_on_off": effective_on_off_global(shared_state),
+        "manual_request": manual_on_off_request(shared_state),
+        "calendar_request": calendar_request(shared_state),
+        "effective_on_off": effective,
+        "on_off_effective": effective,
     }
