@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Set
 
-from func.state import set_manual_on_off
+from func.state import set_manual_on_off, set_schedule_mode, schedule_mode
 
 try:
     from var import const
@@ -33,7 +33,7 @@ POLL_SECONDS = float(getattr(const, "runtime_config_poll_seconds", 1.0))
 _ALLOWED_TOP = {
     "tipico",
     "on_off_global",
-    "on_off_global_override",
+    "schedule_mode",
     "mode",
     "setpoints",
     "settings",
@@ -317,11 +317,10 @@ def _snapshot_editable(shared_state) -> Dict[str, Any]:
     settings = _feature_filtered_settings(shared_state.get("settings", {}), tipico_id)
     setpoints = _filter_setpoints(shared_state.get("setpoints", {}), tipico_id)
     manual = _filter_manual_overrides(shared_state.get("manual_overrides", {}), tipico_id)
-    calendar = shared_state.get("calendar") or {}
     return {
         "tipico": tipico_id,
         "on_off_global": bool(shared_state.get("on_off_global", True)),
-        "on_off_global_override": _as_bool(calendar.get("manual_override", False), False),
+        "schedule_mode": schedule_mode(shared_state),
         "mode": str(shared_state.get("mode", "AUTO")),
         "setpoints": setpoints,
         "settings": settings,
@@ -377,10 +376,9 @@ def _apply(shared_state, payload: Dict[str, Any], *, on_off_override: bool = Fal
             except Exception:
                 pass
         elif key == "on_off_global":
-            override = _as_bool(payload.get("on_off_global_override"), on_off_override)
-            set_manual_on_off(shared_state, payload["on_off_global"], override=override)
-        elif key == "on_off_global_override":
-            continue
+            set_manual_on_off(shared_state, payload["on_off_global"], override=True)
+        elif key == "schedule_mode":
+            set_schedule_mode(shared_state, payload["schedule_mode"])
         elif key == "mode":
             shared_state["mode"] = str(payload["mode"]).upper()
         elif key == "setpoints":

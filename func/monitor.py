@@ -12,7 +12,7 @@ from urllib.parse import urlparse, parse_qs
 import os
 
 from func import calendario, runtime_config
-from func.state import effective_on_off_global
+from func.state import power_policy_snapshot
 try:
     from var import const
 except Exception:  # pragma: no cover
@@ -124,8 +124,9 @@ def _horario_snapshot(load_file: bool = False) -> dict:
 
 
 def snapshot_state(shared_state) -> dict:
+    policy = power_policy_snapshot(shared_state)
     manual_enabled = bool(shared_state.get("on_off_global", True))
-    enabled = effective_on_off_global(shared_state)
+    enabled = bool(policy["effective_on_off"])
     tipico_id = int(shared_state.get("tipico", getattr(tipicos, "DEFAULT_TIPICO", 1)))
     sensors = dict(shared_state.get("sensors", {}))
     outputs = dict(shared_state.get("actuators", {}))
@@ -139,6 +140,10 @@ def snapshot_state(shared_state) -> dict:
 
     return {
         "on_off_global": manual_enabled,
+        "schedule_mode": policy["schedule_mode"],
+        "manual_request": policy["manual_request"],
+        "calendar_request": policy["calendar_request"],
+        "effective_on_off": enabled,
         "on_off_effective": enabled,
         "mode": shared_state.get("mode", "AUTO"),
         "tipico": tipico_id,
@@ -314,7 +319,9 @@ def _build_monitor_html() -> str:
           <span class="meta-pill">Típico: <b>${data.tipico}</b></span>
           <span class="meta-pill">Modo: <b>${data.mode}</b></span>
           <span class="meta-pill ${data.on_off_effective ? 'ok' : 'bad'}">Efectivo: <b>${data.on_off_effective ? 'ON' : 'OFF'}</b></span>
-          <span class="meta-pill ${data.on_off_global ? 'ok' : 'bad'}">Manual: <b>${data.on_off_global ? 'ON' : 'OFF'}</b></span>
+          <span class="meta-pill">Modo salida: <b>${data.schedule_mode || 'AUTO'}</b></span>
+          <span class="meta-pill">Manual: <b>${data.manual_request === null ? 'N/A' : (data.manual_request ? 'ON' : 'OFF')}</b></span>
+          <span class="meta-pill ${data.calendar_request ? 'ok' : 'bad'}">Calendario: <b>${data.calendar_request ? 'ON' : 'OFF'}</b></span>
           <span class="meta-pill">Actualizado: ${ts}</span>
         </div>
         <div class="meta-req">Requeridos → sensores: <code>${reqSensors.join(', ') || '-'}</code> | actuadores: <code>${reqActuators.join(', ') || '-'}</code></div>
@@ -554,7 +561,7 @@ def _build_handler(shared_state):
                     self._json({"error": "payload_must_be_object"}, status=HTTPStatus.BAD_REQUEST)
                     return
 
-                allowed_top = getattr(runtime_config, "_ALLOWED_TOP", {"tipico", "on_off_global", "mode", "setpoints", "settings"})
+                allowed_top = getattr(runtime_config, "_ALLOWED_TOP", {"tipico", "on_off_global", "schedule_mode", "mode", "setpoints", "settings"})
                 sanitized = {k: v for k, v in payload.items() if k in allowed_top}
                 if "setpoints" in sanitized and not isinstance(sanitized.get("setpoints"), dict):
                     sanitized.pop("setpoints", None)

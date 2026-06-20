@@ -45,7 +45,7 @@ Reglas generales:
 - Un payload que no sea JSON válido o que no sea objeto se rechaza.
 - Un comando no reconocido se registra como no aceptado y no modifica el estado.
 - Los comandos de forzado escriben en `manual_overrides` y activan el flag `*_forced` del punto correspondiente.
-- En esta implementación, la validación de modo manual no bloquea los comandos porque `_require_manual()` retorna `True` siempre.
+- `POWER`/`ON_OFF` fijan `schedule_mode` en `MANUAL_ON` o `MANUAL_OFF`; `SCHEDULE_MODE`/`POWER_POLICY` acepta `AUTO`, `MANUAL_ON` o `MANUAL_OFF`.
 
 ## Publicación de estado
 
@@ -55,6 +55,11 @@ El cliente publica periódicamente en el tópico de estado un JSON con esta estr
 {
   "controller": "eg628_AM",
   "on_off_global": true,
+  "schedule_mode": "AUTO",
+  "manual_request": null,
+  "calendar_request": true,
+  "effective_on_off": true,
+  "on_off_effective": true,
   "mode": "AUTO",
   "setpoints": {},
   "outputs": {},
