@@ -6,6 +6,8 @@ Esta carpeta instala la aplicación Python de este repositorio como un servicio 
 
 - `install.sh`: instala o actualiza las unidades systemd.
 - `uninstall.sh`: remueve las unidades systemd y, opcionalmente, el directorio de variables de entorno.
+- `reloj_install.sh`: instala y configura chrony, zona horaria y persistencia RTC.
+- `reloj.uninstall.sh`: remueve la unidad `hwclock.service` y opcionalmente la configuración/paquete chrony.
 - `manejadora_app.service.in`: plantilla de la unidad principal.
 - `manejadora_app.target`: target opcional para operar el stack como grupo.
 - `manejadora_app.env.example`: ejemplo de variables de entorno para auth y branding del monitor.
@@ -83,6 +85,28 @@ sudo APP_ROOT=/opt/manejadora_app \
   SERVICE_USER=dynatek \
   ./install.sh
 ```
+
+
+## Reloj del sistema
+
+Instalación de chrony, timezone y servicio de persistencia RTC:
+
+```bash
+cd /ruta/manejadora_app/scripts
+sudo ./reloj_install.sh
+```
+
+Desinstalación del servicio RTC:
+
+```bash
+cd /ruta/manejadora_app/scripts
+sudo ./reloj.uninstall.sh
+```
+
+Opciones explícitas del uninstall de reloj:
+
+- `REMOVE_CHRONY_CONF=true`: borra el archivo de configuración de chrony.
+- `PURGE_CHRONY=true`: purga el paquete chrony con `apt-get`.
 
 ## Configuración runtime del servicio
 
