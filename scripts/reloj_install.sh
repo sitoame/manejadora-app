@@ -35,6 +35,7 @@ configure_timezone() {
 }
 
 configure_chrony() {
+  # chrony syncs system time
   install -d -m 0755 /etc/chrony /var/log/chrony
   cat > "${CHRONY_CONF}" <<'CHRONY_EOF'
 # chrony cfg for RTC-backed systems
@@ -59,26 +60,32 @@ configure_hwclock_service() {
 
   cat > "${HWCLOCK_SERVICE}" <<'SERVICE_EOF'
 [Unit]
-Description=Save Hardware Clock
+Description=Save Hardware Clock on Shutdown
 DefaultDependencies=no
-Before=shutdown.target
+Before=shutdown.target reboot.target halt.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/hwclock --systohc
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/sbin/hwclock --systohc
 
 [Install]
-WantedBy=shutdown.target
+WantedBy=multi-user.target
 SERVICE_EOF
 
   systemctl daemon-reload
   systemctl enable hwclock.service
+  # keep service active to persist RTC on shutdown/reboot
+  systemctl start hwclock.service
+  systemctl --no-pager status hwclock.service || true
 }
 
 sync_clocks() {
   systemctl restart chrony
   chronyc makestep || true
   date
+  # save system time into RTC now
   hwclock --systohc
 }
 
