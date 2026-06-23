@@ -54,26 +54,25 @@ CHRONY_EOF
 }
 
 configure_hwclock_service() {
+  systemctl stop hwclock.service >/dev/null 2>&1 || true
+  systemctl disable hwclock.service >/dev/null 2>&1 || true
+
   cat > "${HWCLOCK_SERVICE}" <<'SERVICE_EOF'
 [Unit]
 Description=Save Hardware Clock
 DefaultDependencies=no
 Before=shutdown.target
-Conflicts=shutdown.target
 
 [Service]
 Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/true
-ExecStop=/usr/sbin/hwclock --systohc
+ExecStart=/usr/sbin/hwclock --systohc
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=shutdown.target
 SERVICE_EOF
 
   systemctl daemon-reload
   systemctl enable hwclock.service
-  systemctl restart hwclock.service
 }
 
 sync_clocks() {
@@ -97,7 +96,7 @@ main() {
   configure_hwclock_service
   sync_clocks
 
-  systemctl --no-pager status hwclock.service
+  systemctl --no-pager status hwclock.service || true
 }
 
 main "$@"
