@@ -40,12 +40,21 @@ date
 sudo timedatectl set-ntp true
 sudo systemctl restart systemd-timesyncd
 timedatectl
+
 ./my_venv/bin/python -m pip install --upgrade pip
 ./my_venv/bin/python -m pip install -r requirements.txt
 chmod +x scripts/install.sh scripts/uninstall.sh
 sudo usermod -aG dialout dynatek
 sudo chown -R dynatek:dynatek /home/dynatek/manejadora_app/logs && sudo chmod 775 /home/dynatek/manejadora_app/logs
 ```
+
+```bash
+sudo sh -c 'cat > /etc/resolv.conf << EOF
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+EOF'
+```
+
 
 El servicio necesita permisos de lectura y escritura sobre `logs/` y `var/`, además de acceso al puerto Modbus configurado en `var/const.py` cuando `use_modbus_hw = True`.
 
